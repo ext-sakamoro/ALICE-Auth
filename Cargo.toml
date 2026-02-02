@@ -1,0 +1,32 @@
+[package]
+name = "alice-auth"
+version = "0.4.0"
+edition = "2021"
+authors = ["Moroya Sakamoto"]
+description = "Ed25519 ZKP auth for ALICE"
+license = "AGPL-3.0"
+repository = "https://github.com/ext-sakamoro/ALICE-Auth"
+keywords = ["auth", "ed25519", "zkp", "no_std"]
+categories = ["cryptography", "no-std"]
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[features]
+default = []
+std = ["alloc", "getrandom/std"]
+alloc = []
+serde = ["dep:serde"]
+ffi = ["std"]
+
+[dependencies]
+ed25519-dalek = { version = "2.1", default-features = false }
+getrandom = { version = "0.2", default-features = false }
+serde = { version = "1.0", default-features = false, features = ["derive"], optional = true }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+opt-level = "z"
+strip = true
