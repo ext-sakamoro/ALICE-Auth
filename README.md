@@ -181,6 +181,21 @@ if auth.verify(sign_msg) {
 
 With `features = ["secure"]`, ALICE-API provides `SecureGateway` which combines GCRA rate limiting + Ed25519 auth + XChaCha20-Poly1305 encryption in a single pipeline.
 
+## Cross-Crate Bridges
+
+### Crypto Bridge (feature: `crypto`)
+
+Hardware-backed cryptographic token signing and verification via [ALICE-Crypto](../ALICE-Crypto). When enabled, authentication tokens are signed and verified using ALICE-Crypto's XChaCha20-Poly1305 and BLAKE3 primitives, providing stronger token integrity than standalone Ed25519 signatures.
+
+```toml
+[dependencies]
+alice-auth = { version = "0.4", features = ["crypto"] }
+```
+
+### Build Profile Changes
+
+- `[profile.bench]`: Standardized bench profile added
+
 ## Security Properties
 
 ### Zero-Knowledge Proof
