@@ -153,6 +153,34 @@ public class AliceAuth : IDisposable
 }
 ```
 
+## ALICE-API Integration
+
+ALICE-Auth integrates directly into [ALICE-API](../ALICE-API) as an optional middleware layer.
+
+```toml
+[dependencies]
+alice-api = { version = "0.1", features = ["auth"] }
+```
+
+```rust
+use alice_api::prelude::*;
+
+// Client: create auth context from identity
+let identity = alice_auth::Identity::gen().unwrap();
+let sign_msg = b"GET /api/users";
+let auth = AuthContext::new(
+    identity.id().into_bytes(),
+    identity.sign(sign_msg).into_bytes(),
+);
+
+// Gateway: verify inline (after rate limiting, before forwarding)
+if auth.verify(sign_msg) {
+    // Forward to backend
+}
+```
+
+With `features = ["secure"]`, ALICE-API provides `SecureGateway` which combines GCRA rate limiting + Ed25519 auth + XChaCha20-Poly1305 encryption in a single pipeline.
+
 ## Security Properties
 
 ### Zero-Knowledge Proof

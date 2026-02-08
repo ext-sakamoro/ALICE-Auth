@@ -246,6 +246,9 @@ fn hex32(s: &[u8; 32], d: &mut [u8; 64]) {
 // FFI (cold error path, hot success path)
 // ============================================================================
 
+#[cfg(feature = "pyo3")]
+pub mod python;
+
 #[cfg(feature = "ffi")]
 mod ffi {
     use super::*;
