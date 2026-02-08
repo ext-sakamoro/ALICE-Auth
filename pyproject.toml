@@ -1,0 +1,17 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "alice-auth"
+requires-python = ">=3.8"
+description = "Ed25519 ZKP Authentication for ALICE"
+license = { text = "AGPL-3.0" }
+authors = [{ name = "Moroya Sakamoto" }]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
+
+[tool.maturin]
+features = ["pyo3"]
