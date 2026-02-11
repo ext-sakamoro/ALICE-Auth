@@ -192,6 +192,27 @@ Hardware-backed cryptographic token signing and verification via [ALICE-Crypto](
 alice-auth = { version = "0.4", features = ["crypto"] }
 ```
 
+### ALICE-DB Bridge (feature: `db`)
+
+Authentication audit log persistence with time-range queries.
+
+- `AuthAuditLog` — 43-byte binary serialization (identity_hash, timestamp, action, success, zkp_verified)
+- `AuthDbStore` — Store/query audit logs by identity and time range
+- `count_failed_attempts()` — Failed auth counting for rate limiting
+
+Enable: `alice-auth = { features = ["db"] }`
+
+### ALICE-API Bridge (feature: `api`)
+
+Zero-trust middleware for request verification.
+
+- `AuthMiddleware` — Ed25519 signature verification + sliding window rate limiter
+- `AuthRequest` / `AuthResponse` — Token + signature verification flow
+- `create_auth_token()` — Time-limited auth token generation
+- `validate_rate_limit()` — Per-identity sliding window rate limiting
+
+Enable: `alice-auth = { features = ["api"] }`
+
 ### Build Profile Changes
 
 - `[profile.bench]`: Standardized bench profile added
