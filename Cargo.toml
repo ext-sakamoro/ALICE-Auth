@@ -20,6 +20,8 @@ serde = ["dep:serde"]
 ffi = ["std"]
 pyo3 = ["dep:pyo3", "std"]  # Python bindings (no numpy needed)
 crypto = ["dep:alice-crypto", "std"]  # ALICE-Crypto token hashing + session encryption
+db = ["dep:alice-db", "std"]  # ALICE-DB auth audit log persistence
+api = ["std"]  # ALICE-API auth middleware bridge
 
 [dependencies]
 ed25519-dalek = { version = "2.1", default-features = false }
@@ -27,6 +29,7 @@ getrandom = { version = "0.2", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["derive"], optional = true }
 pyo3 = { version = "0.27", features = ["extension-module"], optional = true }
 alice-crypto = { path = "../ALICE-Crypto", optional = true, default-features = false, features = ["std"] }
+alice-db = { path = "../ALICE-DB", optional = true, default-features = false }
 
 [profile.release]
 lto = "fat"

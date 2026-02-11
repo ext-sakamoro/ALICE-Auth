@@ -249,6 +249,12 @@ fn hex32(s: &[u8; 32], d: &mut [u8; 64]) {
 #[cfg(feature = "crypto")]
 pub mod crypto_bridge;
 
+#[cfg(feature = "db")]
+pub mod db_bridge;
+
+#[cfg(feature = "api")]
+pub mod api_bridge;
+
 #[cfg(feature = "pyo3")]
 pub mod python;
 
