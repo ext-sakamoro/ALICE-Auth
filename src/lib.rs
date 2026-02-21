@@ -325,7 +325,7 @@ pub use ffi::*;
 /// linker's requirement for exactly one `#[panic_handler]` without pulling in
 /// any allocator or OS dependency.  Builds with `feature = "std"` use the
 /// standard library's built-in panic handler instead.
-#[cfg(not(feature = "std"))]
+#[cfg(all(not(feature = "std"), not(test)))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
