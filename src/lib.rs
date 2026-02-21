@@ -190,7 +190,10 @@ impl fmt::Debug for AuthResult { #[inline(always)] fn fmt(&self, _: &mut fmt::Fo
 impl fmt::Debug for Pending { #[inline(always)] fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result { Ok(()) } }
 
 #[inline(always)] pub fn make_challenge(id: AliceId) -> Result<Pending> { Ok(Pending { id, c: challenge()? }) }
-#[inline(always)] pub fn check(p: &Pending, r: &Response) -> AuthResult { match verify32(&p.id, &p.c, &r.s) { Ok(()) => AuthResult::Ok(rand().unwrap_or([0; 16])), Err(_) => AuthResult::Fail } }
+/// Returns `AuthResult::Fail` if the signature is invalid *or* if the RNG
+/// cannot produce a session token — an all-zeros token would be a trivially
+/// guessable secret, so we treat RNG failure as an authentication failure.
+#[inline(always)] pub fn check(p: &Pending, r: &Response) -> AuthResult { match verify32(&p.id, &p.c, &r.s) { Ok(()) => match rand::<16>() { Ok(tok) => AuthResult::Ok(tok), Err(_) => AuthResult::Fail }, Err(_) => AuthResult::Fail } }
 #[inline(always)] pub fn hello(i: &Identity) -> Hello { Hello { id: i.id(), v: 1 } }
 #[inline(always)] pub fn respond(i: &Identity, c: &Challenge) -> Response { Response { s: i.sign32(&c.n) } }
 
@@ -312,6 +315,21 @@ mod ffi {
 
 #[cfg(feature = "ffi")]
 pub use ffi::*;
+
+// ============================================================================
+// no_std panic handler
+// ============================================================================
+
+/// In `no_std` builds there is no runtime to call `std::process::abort`, so we
+/// provide a minimal panic handler that spins forever.  This satisfies the
+/// linker's requirement for exactly one `#[panic_handler]` without pulling in
+/// any allocator or OS dependency.  Builds with `feature = "std"` use the
+/// standard library's built-in panic handler instead.
+#[cfg(not(feature = "std"))]
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    loop {}
+}
 
 // ============================================================================
 // Tests

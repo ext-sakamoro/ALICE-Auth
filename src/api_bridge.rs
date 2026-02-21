@@ -4,7 +4,7 @@
 //!
 //! Author: Moroya Sakamoto
 
-use crate::{AliceId, AliceSig, Identity, verify};
+use crate::{AliceId, AliceSig, verify};
 
 /// Authentication request from client
 #[derive(Debug, Clone)]
@@ -48,24 +48,45 @@ impl AuthMiddleware {
         }
     }
 
-    /// Verify an authentication request using Ed25519 signature
+    /// Verify an authentication request using Ed25519 signature.
+    ///
+    /// The signature check and the token read both operate on the same
+    /// immutable `req` borrow, so there is no TOCTOU window between
+    /// validating the signature and reading the expiry timestamp.
     pub fn verify_request(&mut self, req: &AuthRequest) -> AuthResponse {
-        // Verify Ed25519 signature over token
-        if verify(&req.identity, &req.token, &req.signature).is_ok() {
-            self.verified_count += 1;
-            // Extract expiry from token (first 8 bytes = timestamp)
-            let expires_ms = if req.token.len() >= 8 {
-                u64::from_le_bytes(req.token[0..8].try_into().unwrap_or([0; 8]))
-            } else {
-                0
-            };
-            AuthResponse::Authorized {
-                identity: req.identity.clone(),
-                expires_ms,
-            }
-        } else {
+        // Verify Ed25519 signature over token — this is the single,
+        // atomic gate; we only proceed if it succeeds.
+        if verify(&req.identity, &req.token, &req.signature).is_err() {
             self.denied_count += 1;
-            AuthResponse::Denied { reason: "Invalid signature" }
+            return AuthResponse::Denied { reason: "Invalid signature" };
+        }
+
+        // Token must carry at least 8 bytes encoding the expiry timestamp.
+        // A shorter token is a malformed request — reject it explicitly
+        // rather than falling back to a zero expiry (which would look like
+        // a token that expired at the Unix epoch).
+        if req.token.len() < 8 {
+            self.denied_count += 1;
+            return AuthResponse::Denied { reason: "Token too short" };
+        }
+
+        // The slice is exactly 8 bytes here; `try_into` cannot fail, but
+        // we handle the error branch rather than using `unwrap_or([0; 8])`,
+        // which would silently produce an epoch-zero expiry on any
+        // unexpected conversion failure.
+        let expires_bytes: [u8; 8] = match req.token[0..8].try_into() {
+            Ok(b) => b,
+            Err(_) => {
+                self.denied_count += 1;
+                return AuthResponse::Denied { reason: "Token byte conversion failed" };
+            }
+        };
+        let expires_ms = u64::from_le_bytes(expires_bytes);
+
+        self.verified_count += 1;
+        AuthResponse::Authorized {
+            identity: req.identity,
+            expires_ms,
         }
     }
 
