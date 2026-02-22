@@ -32,9 +32,6 @@ pyo3 = { version = "0.27", features = ["extension-module"], optional = true }
 alice-crypto = { path = "../ALICE-Crypto", optional = true, default-features = false, features = ["std"] }
 alice-db = { path = "../ALICE-DB", optional = true, default-features = false }
 
-[profile.dev]
-panic = "abort"
-
 [profile.release]
 lto = "fat"
 codegen-units = 1
