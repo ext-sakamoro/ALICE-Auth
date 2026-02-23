@@ -11,7 +11,7 @@
 //! | `crypto_bridge` | ALICE-Crypto token hashing + session encryption (feature `crypto`) |
 //! | `db_bridge` | ALICE-DB audit-log persistence (feature `db`) |
 //! | `api_bridge` | ALICE-API auth middleware bridge (feature `api`) |
-//! | `python` | PyO3 bindings (feature `pyo3`) |
+//! | `python` | `PyO3` bindings (feature `pyo3`) |
 //!
 //! # Feature Flags
 //!
@@ -21,7 +21,7 @@
 //! | `alloc` | no      | Enables `alloc` crate (subset of `std`). |
 //! | `serde` | no      | Derive `Serialize` / `Deserialize` for wire types. |
 //! | `ffi`   | no      | C-ABI exports (`aa_new`, `aa_sign`, `aa_verify`, `aa_free`). |
-//! | `pyo3`  | no      | Python bindings via PyO3. |
+//! | `pyo3`  | no      | Python bindings via `PyO3`. |
 //! | `crypto`| no      | ALICE-Crypto token hashing + session encryption. |
 //! | `db`    | no      | ALICE-DB audit-log persistence. |
 //! | `api`   | no      | ALICE-API auth middleware bridge. |
@@ -51,6 +51,18 @@
 //!   |<- AuthResult::Ok(token:16B) -|
 //! ```
 
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::cast_lossless,
+    clippy::similar_names,
+    clippy::many_single_char_names,
+    clippy::module_name_repetitions,
+    clippy::inline_always,
+    clippy::too_many_lines
+)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 #[cfg(feature = "alloc")]
@@ -114,14 +126,17 @@ impl AliceId {
     pub const DID_N: usize = 84;
 
     #[inline(always)]
+    #[must_use] 
     pub const fn new(b: [u8; 32]) -> Self {
         Self(b)
     }
     #[inline(always)]
+    #[must_use] 
     pub const fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
     #[inline(always)]
+    #[must_use] 
     pub const fn into_bytes(self) -> [u8; 32] {
         self.0
     }
@@ -148,12 +163,13 @@ impl AliceId {
         buf[17] = b'1';
         buf[18] = b'9';
         buf[19] = b':';
-        let d = unsafe { &mut *(buf.as_mut_ptr().add(20) as *mut [u8; 64]) };
+        let d = unsafe { &mut *buf.as_mut_ptr().add(20).cast::<[u8; 64]>() };
         hex32(&self.0, d);
         unsafe { core::str::from_utf8_unchecked(buf) }
     }
 
     #[inline(always)]
+    #[must_use] 
     pub fn to_did_bytes(&self) -> [u8; 84] {
         let mut b = [0u8; 84];
         self.write_did(&mut b);
@@ -194,14 +210,17 @@ pub struct AliceSig(pub [u8; 64]);
 impl AliceSig {
     pub const N: usize = 64;
     #[inline(always)]
+    #[must_use] 
     pub const fn new(b: [u8; 64]) -> Self {
         Self(b)
     }
     #[inline(always)]
+    #[must_use] 
     pub const fn as_bytes(&self) -> &[u8; 64] {
         &self.0
     }
     #[inline(always)]
+    #[must_use] 
     pub const fn into_bytes(self) -> [u8; 64] {
         self.0
     }
@@ -263,6 +282,8 @@ impl<'de> serde::Deserialize<'de> for AliceSig {
 // Random
 // ============================================================================
 
+/// # Errors
+/// Returns `AuthError::E5` if the platform RNG fails.
 #[inline(always)]
 pub fn rand<const N: usize>() -> Result<[u8; N]> {
     let mut b = [0u8; N];
@@ -270,6 +291,8 @@ pub fn rand<const N: usize>() -> Result<[u8; N]> {
     Ok(b)
 }
 
+/// # Errors
+/// Returns `AuthError::E5` if the platform RNG fails.
 #[inline(always)]
 pub fn challenge() -> Result<[u8; 32]> {
     rand()
@@ -285,11 +308,14 @@ pub struct Identity {
 }
 
 impl Identity {
+    /// # Errors
+    /// Returns `AuthError::E5` if the platform RNG fails.
     #[inline(always)]
     pub fn gen() -> Result<Self> {
         Ok(Self::from_seed(&rand()?))
     }
     #[inline(always)]
+    #[must_use] 
     pub fn from_seed(s: &[u8; 32]) -> Self {
         let sk = SigningKey::from_bytes(s);
         Self {
@@ -298,18 +324,22 @@ impl Identity {
         }
     }
     #[inline(always)]
+    #[must_use] 
     pub fn seed(&self) -> [u8; 32] {
         self.sk.to_bytes()
     }
     #[inline(always)]
+    #[must_use] 
     pub fn id(&self) -> AliceId {
         AliceId(self.pk.to_bytes())
     }
     #[inline(always)]
+    #[must_use] 
     pub fn sign(&self, m: &[u8]) -> AliceSig {
         AliceSig(self.sk.sign(m).to_bytes())
     }
     #[inline(always)]
+    #[must_use] 
     pub fn sign32(&self, c: &[u8; 32]) -> AliceSig {
         self.sign(c)
     }
@@ -319,6 +349,9 @@ impl Identity {
 // Verify
 // ============================================================================
 
+/// # Errors
+/// Returns `AuthError::E1` if the public key is invalid, or `AuthError::E3` if
+/// the signature verification fails.
 #[inline(always)]
 pub fn verify(id: &AliceId, m: &[u8], s: &AliceSig) -> Result<()> {
     let pk = VerifyingKey::from_bytes(&id.0).map_err(|_| AuthError::E1)?;
@@ -326,11 +359,15 @@ pub fn verify(id: &AliceId, m: &[u8], s: &AliceSig) -> Result<()> {
         .map_err(|_| AuthError::E3)
 }
 
+/// # Errors
+/// Returns `AuthError::E1` if the public key is invalid, or `AuthError::E3` if
+/// the signature verification fails.
 #[inline(always)]
 pub fn verify32(id: &AliceId, c: &[u8; 32], s: &AliceSig) -> Result<()> {
     verify(id, c, s)
 }
 #[inline(always)]
+#[must_use] 
 pub fn ok(id: &AliceId, m: &[u8], s: &AliceSig) -> bool {
     verify(id, m, s).is_ok()
 }
@@ -407,6 +444,8 @@ impl fmt::Debug for Pending {
     }
 }
 
+/// # Errors
+/// Returns `AuthError::E5` if the platform RNG fails.
 #[inline(always)]
 pub fn make_challenge(id: AliceId) -> Result<Pending> {
     Ok(Pending {
@@ -418,6 +457,7 @@ pub fn make_challenge(id: AliceId) -> Result<Pending> {
 /// cannot produce a session token — an all-zeros token would be a trivially
 /// guessable secret, so we treat RNG failure as an authentication failure.
 #[inline(always)]
+#[must_use] 
 pub fn check(p: &Pending, r: &Response) -> AuthResult {
     match verify32(&p.id, &p.c, &r.s) {
         Ok(()) => match rand::<16>() {
@@ -428,10 +468,12 @@ pub fn check(p: &Pending, r: &Response) -> AuthResult {
     }
 }
 #[inline(always)]
+#[must_use] 
 pub fn hello(i: &Identity) -> Hello {
     Hello { id: i.id(), v: 1 }
 }
 #[inline(always)]
+#[must_use] 
 pub fn respond(i: &Identity, c: &Challenge) -> Response {
     Response { s: i.sign32(&c.n) }
 }
@@ -608,6 +650,12 @@ mod ffi {
         }
     }
 
+    /// Write the 32-byte public identity into `o`.
+    ///
+    /// # Safety
+    ///
+    /// - `h` must be a valid pointer returned by [`aa_new`], or null.
+    /// - `o` must point to at least 32 writable bytes.
     #[no_mangle]
     pub unsafe extern "C" fn aa_id(h: *const Handle, o: *mut u8) {
         if h.is_null() || o.is_null() {
@@ -617,6 +665,13 @@ mod ffi {
         w32(&(*h).0.id().0, o);
     }
 
+    /// Sign a 32-byte challenge and write the 64-byte signature into `o`.
+    ///
+    /// # Safety
+    ///
+    /// - `h` must be a valid pointer returned by [`aa_new`], or null.
+    /// - `c` must point to at least 32 readable bytes (challenge).
+    /// - `o` must point to at least 64 writable bytes.
     #[no_mangle]
     pub unsafe extern "C" fn aa_sign(h: *const Handle, c: *const u8, o: *mut u8) {
         if h.is_null() || c.is_null() || o.is_null() {
@@ -626,6 +681,16 @@ mod ffi {
         w64(&(*h).0.sign32(&r32(c)).0, o);
     }
 
+    /// Verify an Ed25519 signature over a message.
+    ///
+    /// # Safety
+    ///
+    /// - `pk` must point to at least 32 readable bytes (public key).
+    /// - `m` must point to at least `ml` readable bytes (message).
+    /// - `ml` must not exceed `isize::MAX` and must match the actual
+    ///   allocated size of the buffer at `m`.
+    /// - `s` must point to at least 64 readable bytes (signature).
+    /// - All pointers must remain valid for the duration of this call.
     #[no_mangle]
     pub unsafe extern "C" fn aa_verify(
         pk: *const u8,
@@ -637,6 +702,14 @@ mod ffi {
             null_ptr();
             return 0;
         }
+        // Reject absurd lengths to prevent UB from from_raw_parts.
+        // isize::MAX is the Rust safety invariant; 64 MiB is the practical cap.
+        const MAX_MSG_LEN: usize = 64 * 1024 * 1024;
+        if ml > MAX_MSG_LEN {
+            return 0;
+        }
+        // SAFETY: m is non-null (checked above), ml is within MAX_MSG_LEN,
+        // and the caller guarantees m points to at least ml valid bytes.
         ok(
             &AliceId(r32(pk)),
             core::slice::from_raw_parts(m, ml),
@@ -644,6 +717,12 @@ mod ffi {
         ) as i32
     }
 
+    /// Free a handle previously created by [`aa_new`].
+    ///
+    /// # Safety
+    ///
+    /// - `h` must be a valid pointer returned by [`aa_new`], or null.
+    /// - Must not be called twice on the same pointer (double-free).
     #[no_mangle]
     pub unsafe extern "C" fn aa_free(h: *mut Handle) {
         if h.is_null() {
