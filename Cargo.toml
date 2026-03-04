@@ -1,6 +1,6 @@
 [package]
 name = "alice-auth"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 authors = ["Moroya Sakamoto"]
 description = "Ed25519 ZKP auth for ALICE"
@@ -21,16 +21,19 @@ serde = ["dep:serde"]
 ffi = ["std"]
 pyo3 = ["dep:pyo3", "std"]  # Python bindings (no numpy needed)
 crypto = ["dep:alice-crypto", "std"]  # ALICE-Crypto token hashing + session encryption
-db = ["dep:alice-db", "std"]  # ALICE-DB auth audit log persistence
+nizk = ["dep:curve25519-dalek", "crypto", "std"]  # Schnorr NIZK proof (true ZKP)
+db = ["std"]  # Auth audit log (self-contained BTreeMap store)
 api = ["std"]  # ALICE-API auth middleware bridge
 
 [dependencies]
-ed25519-dalek = { version = "2.1", default-features = false }
+ed25519-dalek = { version = "2.1", default-features = false, features = ["hazmat", "zeroize"] }
 getrandom = { version = "0.2", default-features = false }
+subtle = { version = "2", default-features = false }
+zeroize = { version = "1", default-features = false, features = ["derive"] }
 serde = { version = "1.0", default-features = false, features = ["derive"], optional = true }
 pyo3 = { version = "0.27", features = ["extension-module"], optional = true }
 alice-crypto = { path = "../ALICE-Crypto", optional = true, default-features = false, features = ["std"] }
-alice-db = { path = "../ALICE-DB", optional = true, default-features = false }
+curve25519-dalek = { version = "4", default-features = false, optional = true, features = ["zeroize", "alloc"] }
 
 [profile.release]
 lto = "fat"

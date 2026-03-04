@@ -11,18 +11,20 @@ cargo build --features std           # std build
 ## Test
 
 ```bash
-cargo test --features std
+cargo test --features std                        # core tests
+cargo test --features "std,api,db"               # + API/DB bridges
+cargo test --features "std,api,db,nizk"          # + Schnorr NIZK (all features)
 ```
 
 > **Note**: The `std` feature is required for testing because the test harness
-> needs panic unwinding. The default `no_std` build does not support this.
+> needs panic unwinding. The `nizk` feature requires `alice-crypto` and `curve25519-dalek`.
 
 ## Lint
 
 ```bash
-cargo clippy --features std -- -W clippy::all
+cargo clippy --features "std,api,db,nizk" -- -W clippy::all
 cargo fmt -- --check
-cargo doc --features std --no-deps 2>&1 | grep warning
+cargo doc --features "std,api,db,nizk" --no-deps 2>&1 | grep warning
 ```
 
 ## Design Constraints
