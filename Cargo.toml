@@ -11,10 +11,11 @@ categories = ["cryptography", "no-std"]
 publish = false
 
 [lib]
-crate-type = ["lib", "cdylib"]
+crate-type = ["lib"]
+# FFI shared library: cargo rustc --features ffi --crate-type cdylib
 
 [features]
-default = []
+default = ["std"]
 std = ["alloc", "getrandom/std"]
 alloc = []
 serde = ["dep:serde"]

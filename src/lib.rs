@@ -1732,7 +1732,7 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 // Tests
 // ============================================================================
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
 
@@ -1933,17 +1933,21 @@ mod tests {
         assert_ne!(c1, c2);
     }
 
-    // --- Key Rotation tests ---
+    // --- Key Rotation tests (require std for RotatingIdentity) ---
 
-    #[test]
-    fn rotating_identity_gen() {
-        let ri = RotatingIdentity::gen().unwrap();
-        assert!(!ri.has_previous());
-        assert_eq!(ri.id().0.len(), 32);
-    }
+    #[cfg(feature = "std")]
+    mod rotation_tests {
+        use super::super::*;
 
-    #[test]
-    fn rotating_identity_rotate() {
+        #[test]
+        fn rotating_identity_gen() {
+            let ri = RotatingIdentity::gen().unwrap();
+            assert!(!ri.has_previous());
+            assert_eq!(ri.id().0.len(), 32);
+        }
+
+        #[test]
+        fn rotating_identity_rotate() {
         let mut ri = RotatingIdentity::gen().unwrap();
         let old_id = ri.id();
         let new_id = ri.rotate(1000).unwrap();
@@ -2026,6 +2030,7 @@ mod tests {
         // Should retain at most 4 previous generations
         assert_eq!(ri.generation_count(), 4);
     }
+    } // mod rotation_tests
 
     // --- Challenge TTL tests ---
 
@@ -2183,10 +2188,14 @@ mod tests {
         assert!(!verify_chain(&[e1, e2], &root.id(), 7000));
     }
 
-    // --- Constant-time verification tests ---
+    // --- Constant-time timing tests (require std for Vec/Instant) ---
 
-    #[test]
-    fn verify_timing_consistency() {
+    #[cfg(feature = "std")]
+    mod timing_tests {
+        use super::super::*;
+
+        #[test]
+        fn verify_timing_consistency() {
         let i = Identity::gen().unwrap();
         let msg = [0xAA; 64];
         let valid_sig = i.sign(&msg);
@@ -2268,6 +2277,7 @@ mod tests {
             "timing ratio {ratio} too large (first={df_avg}ns, last={dl_avg}ns)"
         );
     }
+    } // mod timing_tests
 
     #[test]
     fn ct_eq_correctness() {
@@ -2311,9 +2321,13 @@ mod tests {
         assert!(!verify_recovery_approval(&approval));
     }
 
-    #[test]
-    fn validate_recovery_threshold_met() {
-        let g1 = Identity::gen().unwrap();
+    #[cfg(feature = "std")]
+    mod recovery_validate_tests {
+        use super::super::*;
+
+        #[test]
+        fn validate_recovery_threshold_met() {
+            let g1 = Identity::gen().unwrap();
         let g2 = Identity::gen().unwrap();
         let g3 = Identity::gen().unwrap();
         let old = Identity::gen().unwrap();
@@ -2399,4 +2413,5 @@ mod tests {
             &[a1, a2],
         ));
     }
+    } // mod recovery_validate_tests
 }
