@@ -335,8 +335,8 @@ The proof reveals **zero information** about the secret key (simulator-indisting
 ```rust
 use alice_auth::RotatingIdentity;
 
-let mut rotating = RotatingIdentity::new();
-let new_id = rotating.rotate(now_ms);
+let mut rotating = RotatingIdentity::gen()?;
+let new_id = rotating.rotate(now_ms)?;
 
 // Verify against any generation (current or previous)
 assert!(rotating.verify_any(&old_public_key, message, &signature));
@@ -351,7 +351,7 @@ use alice_auth::{endorse, verify_endorsement, verify_chain};
 
 let endorsement = endorse(&root, &child.id(), now_ms, ttl_ms);
 assert!(verify_endorsement(&endorsement, now_ms));
-assert!(verify_chain(&[endorsement1, endorsement2], now_ms));
+assert!(verify_chain(&[endorsement1, endorsement2], &root.id(), now_ms));
 ```
 
 ### Auth Token (feature: `api`)
@@ -407,7 +407,7 @@ let enc_key  = derive_child(&master, 2);  // encryption
 Derive a shared session key from two identities and a shared secret using BLAKE3 hash normalization.
 
 ```rust
-use alice_auth::derive_session_key;
+use alice_auth::crypto_bridge::derive_session_key;
 
 let session_key = derive_session_key(&id_a, &id_b, &shared_secret);
 ```
@@ -506,7 +506,7 @@ Your identity `alice://did:ed25519:...` is mathematically yours. If a world bans
 | Tests | 145 (0 clippy warnings, 0 fmt diff) |
 | FFI Functions | 28 (C-ABI) |
 | PyO3 Bindings | 15 functions + 5 classes |
-| Unity C# Wrapper | 28 DllImport + 8 classes |
+| Unity C# Wrapper | 28 DllImport + 9 classes |
 | UE5 C++ Header | 28 extern C + 8 RAII classes |
 | Eco-System Bridges | 17 (8 + 9) |
 

@@ -80,6 +80,7 @@ use zeroize::Zeroize;
 // Error (zero .rodata, no match)
 // ============================================================================
 
+/// Authentication error codes (E1–E5). Zero `.rodata` in release builds.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum AuthError {
@@ -113,12 +114,14 @@ impl fmt::Debug for AuthError {
     }
 }
 
+/// Alias for `core::result::Result<T, AuthError>`.
 pub type Result<T> = core::result::Result<T, AuthError>;
 
 // ============================================================================
 // Types
 // ============================================================================
 
+/// 32-byte Ed25519 public key identifier. Supports `alice://did:ed25519:` DID encoding.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -208,6 +211,7 @@ impl fmt::Display for AliceId {
     }
 }
 
+/// 64-byte Ed25519 signature.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct AliceSig(pub [u8; 64]);
@@ -307,6 +311,7 @@ pub fn challenge() -> Result<[u8; 32]> {
 // Identity
 // ============================================================================
 
+/// Ed25519 signing identity. Secret key is zeroized on drop.
 pub struct Identity {
     sk: SigningKey,
     pk: VerifyingKey,
@@ -381,6 +386,7 @@ pub fn verify(id: &AliceId, m: &[u8], s: &AliceSig) -> Result<()> {
 pub fn verify32(id: &AliceId, c: &[u8; 32], s: &AliceSig) -> Result<()> {
     verify(id, c, s)
 }
+/// Boolean signature verification (returns `true`/`false` instead of `Result`).
 #[inline(always)]
 #[must_use]
 pub fn ok(id: &AliceId, m: &[u8], s: &AliceSig) -> bool {
@@ -391,6 +397,7 @@ pub fn ok(id: &AliceId, m: &[u8], s: &AliceSig) -> bool {
 // Protocol
 // ============================================================================
 
+/// Client greeting containing the public identity and protocol version.
 #[derive(Clone, Copy)]
 #[repr(C)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -399,6 +406,7 @@ pub struct Hello {
     pub v: u8,
 }
 
+/// Server-issued 32-byte random challenge nonce.
 #[derive(Clone, Copy)]
 #[repr(C)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -406,6 +414,7 @@ pub struct Challenge {
     pub n: [u8; 32],
 }
 
+/// Client response: Ed25519 signature over the challenge nonce.
 #[derive(Clone, Copy)]
 #[repr(C)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -413,6 +422,7 @@ pub struct Response {
     pub s: AliceSig,
 }
 
+/// Authentication result: `Ok(session_token)` or `Fail`.
 #[derive(Clone, Copy)]
 #[repr(C)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -421,6 +431,7 @@ pub enum AuthResult {
     Fail,
 }
 
+/// Server-side pending challenge state (identity + nonce).
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Pending {
@@ -482,11 +493,13 @@ pub fn check(p: &Pending, r: &Response) -> AuthResult {
         Err(_) => AuthResult::Fail,
     }
 }
+/// Create a `Hello` greeting from an identity.
 #[inline(always)]
 #[must_use]
 pub fn hello(i: &Identity) -> Hello {
     Hello { id: i.id(), v: 1 }
 }
+/// Sign a challenge nonce, producing a `Response`.
 #[inline(always)]
 #[must_use]
 pub fn respond(i: &Identity, c: &Challenge) -> Response {
@@ -1948,88 +1961,88 @@ mod tests {
 
         #[test]
         fn rotating_identity_rotate() {
-        let mut ri = RotatingIdentity::gen().unwrap();
-        let old_id = ri.id();
-        let new_id = ri.rotate(1000).unwrap();
-        assert_ne!(old_id, new_id);
-        assert!(ri.has_previous());
-        let (prev_id, ts) = ri.previous_id().unwrap();
-        assert_eq!(prev_id, old_id);
-        assert_eq!(ts, 1000);
-    }
-
-    #[test]
-    fn rotating_identity_verify_any_current() {
-        let ri = RotatingIdentity::gen().unwrap();
-        let sig = ri.sign(b"msg");
-        assert!(ri.verify_any(&ri.id(), b"msg", &sig));
-    }
-
-    #[test]
-    fn rotating_identity_verify_any_previous() {
-        let mut ri = RotatingIdentity::gen().unwrap();
-        let old_id = ri.id();
-        let sig = ri.sign(b"msg");
-        ri.rotate(1000).unwrap();
-        // Old signature still verifiable via verify_any
-        assert!(ri.verify_any(&old_id, b"msg", &sig));
-    }
-
-    #[test]
-    fn rotating_identity_clear_previous() {
-        let mut ri = RotatingIdentity::gen().unwrap();
-        ri.rotate(1000).unwrap();
-        assert!(ri.has_previous());
-        ri.clear_previous();
-        assert!(!ri.has_previous());
-    }
-
-    #[test]
-    fn rotating_identity_double_rotate() {
-        let mut ri = RotatingIdentity::gen().unwrap();
-        let id1 = ri.id();
-        ri.rotate(1000).unwrap();
-        let id2 = ri.id();
-        ri.rotate(2000).unwrap();
-        let id3 = ri.id();
-        assert_ne!(id1, id2);
-        assert_ne!(id2, id3);
-        // Most recent previous key
-        let (prev, ts) = ri.previous_id().unwrap();
-        assert_eq!(prev, id2);
-        assert_eq!(ts, 2000);
-        // Both previous generations retained (max_generations=2)
-        assert_eq!(ri.generation_count(), 2);
-    }
-
-    #[test]
-    fn rotating_identity_n_generations() {
-        let mut ri = RotatingIdentity::gen().unwrap();
-        let id0 = ri.id();
-        ri.rotate(1000).unwrap();
-        let id1 = ri.id();
-        ri.rotate(2000).unwrap();
-        let id2 = ri.id();
-        ri.rotate(3000).unwrap();
-        // max_generations=2: oldest (id0) should be evicted
-        assert_eq!(ri.generation_count(), 2);
-        let prev_ids = ri.previous_ids();
-        assert_eq!(prev_ids[0].0, id1);
-        assert_eq!(prev_ids[1].0, id2);
-        // Evicted id0 not in previous_ids
-        assert!(prev_ids.iter().all(|(id, _)| *id != id0));
-    }
-
-    #[test]
-    fn rotating_identity_custom_max_generations() {
-        let base = Identity::gen().unwrap();
-        let mut ri = RotatingIdentity::with_max_generations(base, 4);
-        for i in 0..6 {
-            ri.rotate(i * 1000).unwrap();
+            let mut ri = RotatingIdentity::gen().unwrap();
+            let old_id = ri.id();
+            let new_id = ri.rotate(1000).unwrap();
+            assert_ne!(old_id, new_id);
+            assert!(ri.has_previous());
+            let (prev_id, ts) = ri.previous_id().unwrap();
+            assert_eq!(prev_id, old_id);
+            assert_eq!(ts, 1000);
         }
-        // Should retain at most 4 previous generations
-        assert_eq!(ri.generation_count(), 4);
-    }
+
+        #[test]
+        fn rotating_identity_verify_any_current() {
+            let ri = RotatingIdentity::gen().unwrap();
+            let sig = ri.sign(b"msg");
+            assert!(ri.verify_any(&ri.id(), b"msg", &sig));
+        }
+
+        #[test]
+        fn rotating_identity_verify_any_previous() {
+            let mut ri = RotatingIdentity::gen().unwrap();
+            let old_id = ri.id();
+            let sig = ri.sign(b"msg");
+            ri.rotate(1000).unwrap();
+            // Old signature still verifiable via verify_any
+            assert!(ri.verify_any(&old_id, b"msg", &sig));
+        }
+
+        #[test]
+        fn rotating_identity_clear_previous() {
+            let mut ri = RotatingIdentity::gen().unwrap();
+            ri.rotate(1000).unwrap();
+            assert!(ri.has_previous());
+            ri.clear_previous();
+            assert!(!ri.has_previous());
+        }
+
+        #[test]
+        fn rotating_identity_double_rotate() {
+            let mut ri = RotatingIdentity::gen().unwrap();
+            let id1 = ri.id();
+            ri.rotate(1000).unwrap();
+            let id2 = ri.id();
+            ri.rotate(2000).unwrap();
+            let id3 = ri.id();
+            assert_ne!(id1, id2);
+            assert_ne!(id2, id3);
+            // Most recent previous key
+            let (prev, ts) = ri.previous_id().unwrap();
+            assert_eq!(prev, id2);
+            assert_eq!(ts, 2000);
+            // Both previous generations retained (max_generations=2)
+            assert_eq!(ri.generation_count(), 2);
+        }
+
+        #[test]
+        fn rotating_identity_n_generations() {
+            let mut ri = RotatingIdentity::gen().unwrap();
+            let id0 = ri.id();
+            ri.rotate(1000).unwrap();
+            let id1 = ri.id();
+            ri.rotate(2000).unwrap();
+            let id2 = ri.id();
+            ri.rotate(3000).unwrap();
+            // max_generations=2: oldest (id0) should be evicted
+            assert_eq!(ri.generation_count(), 2);
+            let prev_ids = ri.previous_ids();
+            assert_eq!(prev_ids[0].0, id1);
+            assert_eq!(prev_ids[1].0, id2);
+            // Evicted id0 not in previous_ids
+            assert!(prev_ids.iter().all(|(id, _)| *id != id0));
+        }
+
+        #[test]
+        fn rotating_identity_custom_max_generations() {
+            let base = Identity::gen().unwrap();
+            let mut ri = RotatingIdentity::with_max_generations(base, 4);
+            for i in 0..6 {
+                ri.rotate(i * 1000).unwrap();
+            }
+            // Should retain at most 4 previous generations
+            assert_eq!(ri.generation_count(), 4);
+        }
     } // mod rotation_tests
 
     // --- Challenge TTL tests ---
@@ -2196,87 +2209,87 @@ mod tests {
 
         #[test]
         fn verify_timing_consistency() {
-        let i = Identity::gen().unwrap();
-        let msg = [0xAA; 64];
-        let valid_sig = i.sign(&msg);
-        let invalid_sig = AliceSig::new([0u8; 64]);
+            let i = Identity::gen().unwrap();
+            let msg = [0xAA; 64];
+            let valid_sig = i.sign(&msg);
+            let invalid_sig = AliceSig::new([0u8; 64]);
 
-        // Run multiple rounds to check variance is bounded
-        let rounds = 100;
-        let mut valid_times = Vec::with_capacity(rounds);
-        let mut invalid_times = Vec::with_capacity(rounds);
+            // Run multiple rounds to check variance is bounded
+            let rounds = 100;
+            let mut valid_times = Vec::with_capacity(rounds);
+            let mut invalid_times = Vec::with_capacity(rounds);
 
-        for _ in 0..rounds {
-            let start = std::time::Instant::now();
-            let _ = verify(&i.id(), &msg, &valid_sig);
-            valid_times.push(start.elapsed().as_nanos());
-        }
-        for _ in 0..rounds {
-            let start = std::time::Instant::now();
-            let _ = verify(&i.id(), &msg, &invalid_sig);
-            invalid_times.push(start.elapsed().as_nanos());
-        }
+            for _ in 0..rounds {
+                let start = std::time::Instant::now();
+                let _ = verify(&i.id(), &msg, &valid_sig);
+                valid_times.push(start.elapsed().as_nanos());
+            }
+            for _ in 0..rounds {
+                let start = std::time::Instant::now();
+                let _ = verify(&i.id(), &msg, &invalid_sig);
+                invalid_times.push(start.elapsed().as_nanos());
+            }
 
-        let valid_avg: u128 = valid_times.iter().sum::<u128>() / rounds as u128;
-        let invalid_avg: u128 = invalid_times.iter().sum::<u128>() / rounds as u128;
+            let valid_avg: u128 = valid_times.iter().sum::<u128>() / rounds as u128;
+            let invalid_avg: u128 = invalid_times.iter().sum::<u128>() / rounds as u128;
 
-        // The ratio between valid and invalid verification times should be
-        // within 10x of each other (loose bound to avoid flaky CI).
-        // A non-constant-time implementation would show much larger divergence.
-        let ratio = if valid_avg > invalid_avg {
-            valid_avg / invalid_avg.max(1)
-        } else {
-            invalid_avg / valid_avg.max(1)
-        };
-        assert!(
+            // The ratio between valid and invalid verification times should be
+            // within 10x of each other (loose bound to avoid flaky CI).
+            // A non-constant-time implementation would show much larger divergence.
+            let ratio = if valid_avg > invalid_avg {
+                valid_avg / invalid_avg.max(1)
+            } else {
+                invalid_avg / valid_avg.max(1)
+            };
+            assert!(
             ratio < 10,
             "timing ratio {ratio} too large (valid_avg={valid_avg}ns, invalid_avg={invalid_avg}ns)"
         );
-    }
-
-    #[test]
-    fn ct_eq_16_timing_consistency() {
-        let a = [0xAAu8; 16];
-        let b_same = [0xAAu8; 16];
-        let mut b_diff = [0xAAu8; 16];
-        b_diff[0] = 0xBB;
-        let mut b_last = [0xAAu8; 16];
-        b_last[15] = 0xBB;
-
-        let rounds = 200;
-        let mut same_times = Vec::with_capacity(rounds);
-        let mut diff_first_times = Vec::with_capacity(rounds);
-        let mut diff_last_times = Vec::with_capacity(rounds);
-
-        for _ in 0..rounds {
-            let start = std::time::Instant::now();
-            let _ = ct_eq(&a, &b_same);
-            same_times.push(start.elapsed().as_nanos());
-        }
-        for _ in 0..rounds {
-            let start = std::time::Instant::now();
-            let _ = ct_eq(&a, &b_diff);
-            diff_first_times.push(start.elapsed().as_nanos());
-        }
-        for _ in 0..rounds {
-            let start = std::time::Instant::now();
-            let _ = ct_eq(&a, &b_last);
-            diff_last_times.push(start.elapsed().as_nanos());
         }
 
-        // Difference at first byte vs last byte should produce similar timing
-        let df_avg: u128 = diff_first_times.iter().sum::<u128>() / rounds as u128;
-        let dl_avg: u128 = diff_last_times.iter().sum::<u128>() / rounds as u128;
-        let ratio = if df_avg > dl_avg {
-            df_avg / dl_avg.max(1)
-        } else {
-            dl_avg / df_avg.max(1)
-        };
-        assert!(
-            ratio < 10,
-            "timing ratio {ratio} too large (first={df_avg}ns, last={dl_avg}ns)"
-        );
-    }
+        #[test]
+        fn ct_eq_16_timing_consistency() {
+            let a = [0xAAu8; 16];
+            let b_same = [0xAAu8; 16];
+            let mut b_diff = [0xAAu8; 16];
+            b_diff[0] = 0xBB;
+            let mut b_last = [0xAAu8; 16];
+            b_last[15] = 0xBB;
+
+            let rounds = 200;
+            let mut same_times = Vec::with_capacity(rounds);
+            let mut diff_first_times = Vec::with_capacity(rounds);
+            let mut diff_last_times = Vec::with_capacity(rounds);
+
+            for _ in 0..rounds {
+                let start = std::time::Instant::now();
+                let _ = ct_eq(&a, &b_same);
+                same_times.push(start.elapsed().as_nanos());
+            }
+            for _ in 0..rounds {
+                let start = std::time::Instant::now();
+                let _ = ct_eq(&a, &b_diff);
+                diff_first_times.push(start.elapsed().as_nanos());
+            }
+            for _ in 0..rounds {
+                let start = std::time::Instant::now();
+                let _ = ct_eq(&a, &b_last);
+                diff_last_times.push(start.elapsed().as_nanos());
+            }
+
+            // Difference at first byte vs last byte should produce similar timing
+            let df_avg: u128 = diff_first_times.iter().sum::<u128>() / rounds as u128;
+            let dl_avg: u128 = diff_last_times.iter().sum::<u128>() / rounds as u128;
+            let ratio = if df_avg > dl_avg {
+                df_avg / dl_avg.max(1)
+            } else {
+                dl_avg / df_avg.max(1)
+            };
+            assert!(
+                ratio < 10,
+                "timing ratio {ratio} too large (first={df_avg}ns, last={dl_avg}ns)"
+            );
+        }
     } // mod timing_tests
 
     #[test]
@@ -2328,90 +2341,90 @@ mod tests {
         #[test]
         fn validate_recovery_threshold_met() {
             let g1 = Identity::gen().unwrap();
-        let g2 = Identity::gen().unwrap();
-        let g3 = Identity::gen().unwrap();
-        let old = Identity::gen().unwrap();
-        let new = Identity::gen().unwrap();
+            let g2 = Identity::gen().unwrap();
+            let g3 = Identity::gen().unwrap();
+            let old = Identity::gen().unwrap();
+            let new = Identity::gen().unwrap();
 
-        let config = RecoveryConfig {
-            guardians: vec![g1.id(), g2.id(), g3.id()],
-            threshold: 2,
-        };
+            let config = RecoveryConfig {
+                guardians: vec![g1.id(), g2.id(), g3.id()],
+                threshold: 2,
+            };
 
-        let a1 = approve_recovery(&g1, &old.id(), &new.id(), 1000);
-        let a2 = approve_recovery(&g2, &old.id(), &new.id(), 2000);
+            let a1 = approve_recovery(&g1, &old.id(), &new.id(), 1000);
+            let a2 = approve_recovery(&g2, &old.id(), &new.id(), 2000);
 
-        assert!(validate_recovery(&config, &old.id(), &new.id(), &[a1, a2],));
-    }
+            assert!(validate_recovery(&config, &old.id(), &new.id(), &[a1, a2],));
+        }
 
-    #[test]
-    fn validate_recovery_threshold_not_met() {
-        let g1 = Identity::gen().unwrap();
-        let g2 = Identity::gen().unwrap();
-        let old = Identity::gen().unwrap();
-        let new = Identity::gen().unwrap();
+        #[test]
+        fn validate_recovery_threshold_not_met() {
+            let g1 = Identity::gen().unwrap();
+            let g2 = Identity::gen().unwrap();
+            let old = Identity::gen().unwrap();
+            let new = Identity::gen().unwrap();
 
-        let config = RecoveryConfig {
-            guardians: vec![g1.id(), g2.id()],
-            threshold: 2,
-        };
+            let config = RecoveryConfig {
+                guardians: vec![g1.id(), g2.id()],
+                threshold: 2,
+            };
 
-        let a1 = approve_recovery(&g1, &old.id(), &new.id(), 1000);
-        // Only 1 approval, need 2
-        assert!(!validate_recovery(&config, &old.id(), &new.id(), &[a1],));
-    }
+            let a1 = approve_recovery(&g1, &old.id(), &new.id(), 1000);
+            // Only 1 approval, need 2
+            assert!(!validate_recovery(&config, &old.id(), &new.id(), &[a1],));
+        }
 
-    #[test]
-    fn validate_recovery_unregistered_guardian() {
-        let g1 = Identity::gen().unwrap();
-        let stranger = Identity::gen().unwrap();
-        let old = Identity::gen().unwrap();
-        let new = Identity::gen().unwrap();
+        #[test]
+        fn validate_recovery_unregistered_guardian() {
+            let g1 = Identity::gen().unwrap();
+            let stranger = Identity::gen().unwrap();
+            let old = Identity::gen().unwrap();
+            let new = Identity::gen().unwrap();
 
-        let config = RecoveryConfig {
-            guardians: vec![g1.id()],
-            threshold: 1,
-        };
+            let config = RecoveryConfig {
+                guardians: vec![g1.id()],
+                threshold: 1,
+            };
 
-        // Stranger's approval should not count
-        let a = approve_recovery(&stranger, &old.id(), &new.id(), 1000);
-        assert!(!validate_recovery(&config, &old.id(), &new.id(), &[a],));
-    }
+            // Stranger's approval should not count
+            let a = approve_recovery(&stranger, &old.id(), &new.id(), 1000);
+            assert!(!validate_recovery(&config, &old.id(), &new.id(), &[a],));
+        }
 
-    #[test]
-    fn validate_recovery_empty_config() {
-        let config = RecoveryConfig {
-            guardians: vec![],
-            threshold: 0,
-        };
-        assert!(!validate_recovery(
-            &config,
-            &AliceId::new([0; 32]),
-            &AliceId::new([1; 32]),
-            &[],
-        ));
-    }
+        #[test]
+        fn validate_recovery_empty_config() {
+            let config = RecoveryConfig {
+                guardians: vec![],
+                threshold: 0,
+            };
+            assert!(!validate_recovery(
+                &config,
+                &AliceId::new([0; 32]),
+                &AliceId::new([1; 32]),
+                &[],
+            ));
+        }
 
-    #[test]
-    fn validate_recovery_duplicate_guardian_rejected() {
-        let g1 = Identity::gen().unwrap();
-        let old = Identity::gen().unwrap();
-        let new_id = Identity::gen().unwrap();
+        #[test]
+        fn validate_recovery_duplicate_guardian_rejected() {
+            let g1 = Identity::gen().unwrap();
+            let old = Identity::gen().unwrap();
+            let new_id = Identity::gen().unwrap();
 
-        let config = RecoveryConfig {
-            guardians: vec![g1.id()],
-            threshold: 2,
-        };
+            let config = RecoveryConfig {
+                guardians: vec![g1.id()],
+                threshold: 2,
+            };
 
-        // Same guardian approves twice — should count as 1, not 2
-        let a1 = approve_recovery(&g1, &old.id(), &new_id.id(), 1000);
-        let a2 = approve_recovery(&g1, &old.id(), &new_id.id(), 2000);
-        assert!(!validate_recovery(
-            &config,
-            &old.id(),
-            &new_id.id(),
-            &[a1, a2],
-        ));
-    }
+            // Same guardian approves twice — should count as 1, not 2
+            let a1 = approve_recovery(&g1, &old.id(), &new_id.id(), 1000);
+            let a2 = approve_recovery(&g1, &old.id(), &new_id.id(), 2000);
+            assert!(!validate_recovery(
+                &config,
+                &old.id(),
+                &new_id.id(),
+                &[a1, a2],
+            ));
+        }
     } // mod recovery_validate_tests
 }
