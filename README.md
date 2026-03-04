@@ -48,7 +48,16 @@ sequenceDiagram
 
 ```toml
 [dependencies]
-alice-auth = { version = "0.5", default-features = false }
+alice-auth = "0.5"                    # includes std (default)
+alice-auth = { version = "0.5", default-features = false }  # no_std (embedded/WASM)
+```
+
+## Testing
+
+```bash
+cargo test                                      # 62 tests (std default)
+cargo test --features nizk,db,api,serde,ffi     # 145 tests (full suite)
+cargo check --no-default-features               # verify no_std build
 ```
 
 ## Feature Flags
@@ -130,10 +139,10 @@ match check(&pending, &r) {
 
 Full wrapper: [`bindings/unity/AliceAuth.cs`](bindings/unity/AliceAuth.cs)
 
-Build the native plugin:
+Build the native plugin (cdylib):
 
 ```bash
-cargo build --release --features "ffi,nizk"
+cargo rustc --release --features "ffi,nizk" --crate-type cdylib
 # Output:
 #   macOS:   target/release/libalice_auth.dylib
 #   Windows: target/release/alice_auth.dll
