@@ -1052,8 +1052,14 @@ pub fn validate_recovery(
 #[cfg(feature = "crypto")]
 pub mod crypto_bridge;
 
+#[cfg(feature = "std")]
+pub mod jwt;
+
 #[cfg(feature = "nizk")]
 pub mod nizk;
+
+#[cfg(feature = "std")]
+pub mod totp;
 
 #[cfg(feature = "db")]
 pub mod db_bridge;
