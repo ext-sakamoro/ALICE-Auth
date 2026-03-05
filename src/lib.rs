@@ -479,19 +479,16 @@ pub fn make_challenge(id: AliceId) -> Result<Pending> {
         c: challenge()?,
     })
 }
-/// Returns `AuthResult::Fail` if the signature is invalid *or* if the RNG
-/// cannot produce a session token — an all-zeros token would be a trivially
+/// Returns `AuthResult::Fail` if the signature is invalid or RNG fails.
+///
+/// An all-zeros token would be a trivially
 /// guessable secret, so we treat RNG failure as an authentication failure.
 #[inline(always)]
 #[must_use]
 pub fn check(p: &Pending, r: &Response) -> AuthResult {
-    match verify32(&p.id, &p.c, &r.s) {
-        Ok(()) => match rand::<16>() {
-            Ok(tok) => AuthResult::Ok(tok),
-            Err(_) => AuthResult::Fail,
-        },
-        Err(_) => AuthResult::Fail,
-    }
+    verify32(&p.id, &p.c, &r.s).map_or(AuthResult::Fail, |()| {
+        rand::<16>().map_or(AuthResult::Fail, AuthResult::Ok)
+    })
 }
 /// Create a `Hello` greeting from an identity.
 #[inline(always)]
@@ -547,7 +544,7 @@ fn hex8(s: &[u8], d: &mut [u8; 16]) {
 }
 
 #[inline(always)]
-fn hex32(s: &[u8; 32], d: &mut [u8; 64]) {
+const fn hex32(s: &[u8; 32], d: &mut [u8; 64]) {
     d[0] = H[(s[0] >> 4) as usize];
     d[1] = H[(s[0] & 0xf) as usize];
     d[2] = H[(s[1] >> 4) as usize];
@@ -681,7 +678,7 @@ impl RotatingIdentity {
 
     /// Create from an existing identity.
     #[must_use]
-    pub fn from_identity(id: Identity) -> Self {
+    pub const fn from_identity(id: Identity) -> Self {
         Self {
             current: id,
             previous: Vec::new(),
@@ -701,7 +698,7 @@ impl RotatingIdentity {
 
     /// Rotate to a new keypair. The old key is archived with a timestamp.
     /// Oldest generations beyond `max_generations` are evicted (and zeroized).
-    /// Returns the new public AliceId.
+    /// Returns the new public `AliceId`.
     /// # Errors
     /// Returns `AuthError::E5` if the platform RNG fails.
     pub fn rotate(&mut self, now_ms: u64) -> Result<AliceId> {
@@ -769,13 +766,13 @@ impl RotatingIdentity {
 
     /// Check if rotation has occurred and previous keys exist.
     #[must_use]
-    pub fn has_previous(&self) -> bool {
+    pub const fn has_previous(&self) -> bool {
         !self.previous.is_empty()
     }
 
     /// Number of retained previous generations.
     #[must_use]
-    pub fn generation_count(&self) -> usize {
+    pub const fn generation_count(&self) -> usize {
         self.previous.len()
     }
 }
@@ -819,7 +816,7 @@ pub fn make_timed_challenge(id: AliceId, now_ms: u64) -> Result<TimedPending> {
 ///
 /// Returns `AuthResult::Fail` if:
 /// - The signature is invalid
-/// - The challenge has expired (now_ms - created_ms > ttl_ms)
+/// - The challenge has expired (`now_ms` - `created_ms` > `ttl_ms`)
 /// - The RNG fails to generate a session token
 #[inline]
 #[must_use]
@@ -858,7 +855,7 @@ impl fmt::Debug for Endorsement {
 }
 
 impl Endorsement {
-    /// Serialize the endorsement payload (endorsed_id || issued_ms || expires_ms)
+    /// Serialize the endorsement payload (`endorsed_id` || `issued_ms` || `expires_ms`)
     /// that gets signed by the endorser.
     #[inline]
     fn payload(endorsed: &AliceId, issued_ms: u64, expires_ms: u64) -> [u8; 48] {
@@ -944,7 +941,7 @@ pub struct RecoveryConfig {
     pub threshold: u8,
 }
 
-/// A guardian's approval for migrating from old_id to new_id.
+/// A guardian's approval for migrating from `old_id` to `new_id`.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct RecoveryApproval {
@@ -964,7 +961,7 @@ impl fmt::Debug for RecoveryApproval {
 
 impl RecoveryApproval {
     /// Serialize the recovery payload that gets signed:
-    /// "recover" || old_id(32) || new_id(32) || timestamp(8) = 79 bytes
+    /// "recover" || `old_id(32)` || `new_id(32)` || timestamp(8) = 79 bytes
     fn payload(old_id: &AliceId, new_id: &AliceId, approved_ms: u64) -> [u8; 79] {
         let mut buf = [0u8; 79];
         buf[0..7].copy_from_slice(b"recover");
@@ -1007,7 +1004,7 @@ pub fn verify_recovery_approval(approval: &RecoveryApproval) -> bool {
 ///
 /// Returns true if:
 /// 1. At least `threshold` valid approvals from registered guardians
-/// 2. All approvals agree on the same old_id and new_id
+/// 2. All approvals agree on the same `old_id` and `new_id`
 /// 3. All signatures verify correctly
 #[cfg(feature = "std")]
 #[must_use]
@@ -2257,14 +2254,13 @@ mod tests {
             b_last[15] = 0xBB;
 
             let rounds = 200;
-            let mut same_times = Vec::with_capacity(rounds);
             let mut diff_first_times = Vec::with_capacity(rounds);
             let mut diff_last_times = Vec::with_capacity(rounds);
 
             for _ in 0..rounds {
                 let start = std::time::Instant::now();
                 let _ = ct_eq(&a, &b_same);
-                same_times.push(start.elapsed().as_nanos());
+                std::hint::black_box(start.elapsed().as_nanos());
             }
             for _ in 0..rounds {
                 let start = std::time::Instant::now();
