@@ -50,11 +50,24 @@ fn base64url_decode(s: &str) -> Option<Vec<u8>> {
     let mut i = 0;
     while i < bytes.len() {
         let a = decode_b64_char(bytes[i])?;
-        let b = if i + 1 < bytes.len() { decode_b64_char(bytes[i + 1])? } else { 0 };
-        let c = if i + 2 < bytes.len() { decode_b64_char(bytes[i + 2])? } else { 0 };
-        let d = if i + 3 < bytes.len() { decode_b64_char(bytes[i + 3])? } else { 0 };
+        let b = if i + 1 < bytes.len() {
+            decode_b64_char(bytes[i + 1])?
+        } else {
+            0
+        };
+        let c = if i + 2 < bytes.len() {
+            decode_b64_char(bytes[i + 2])?
+        } else {
+            0
+        };
+        let d = if i + 3 < bytes.len() {
+            decode_b64_char(bytes[i + 3])?
+        } else {
+            0
+        };
 
-        let triple = (u32::from(a) << 18) | (u32::from(b) << 12) | (u32::from(c) << 6) | u32::from(d);
+        let triple =
+            (u32::from(a) << 18) | (u32::from(b) << 12) | (u32::from(c) << 6) | u32::from(d);
 
         buf.push((triple >> 16) as u8);
         let remaining = bytes.len() - i;
@@ -70,7 +83,7 @@ fn base64url_decode(s: &str) -> Option<Vec<u8>> {
     Some(buf)
 }
 
-fn decode_b64_char(c: u8) -> Option<u8> {
+const fn decode_b64_char(c: u8) -> Option<u8> {
     match c {
         b'A'..=b'Z' => Some(c - b'A'),
         b'a'..=b'z' => Some(c - b'a' + 26),
@@ -115,7 +128,7 @@ impl JwtClaims {
 
     /// 発行時刻を設定して有効期限を計算。
     #[must_use]
-    pub fn with_iat(mut self, iat: u64) -> Self {
+    pub const fn with_iat(mut self, iat: u64) -> Self {
         let ttl = self.exp; // new() で ttl として格納
         self.iat = iat;
         self.exp = iat + ttl;
@@ -124,7 +137,7 @@ impl JwtClaims {
 
     /// 有効期限チェック。
     #[must_use]
-    pub fn is_expired(&self, now: u64) -> bool {
+    pub const fn is_expired(&self, now: u64) -> bool {
         now >= self.exp
     }
 
@@ -282,7 +295,12 @@ mod tests {
 
         // ペイロードを改竄
         let parts: Vec<&str> = token.splitn(3, '.').collect();
-        let tampered = format!("{}.{}.{}", parts[0], base64url_encode(b"tampered"), parts[2]);
+        let tampered = format!(
+            "{}.{}.{}",
+            parts[0],
+            base64url_encode(b"tampered"),
+            parts[2]
+        );
 
         assert!(verify_jwt(&tampered, &id.id()).is_none());
     }
