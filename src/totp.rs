@@ -227,8 +227,8 @@ mod tests {
     fn sha1_empty() {
         let h = sha1(b"");
         let expected = [
-            0xda, 0x39, 0xa3, 0xee, 0x5e, 0x6b, 0x4b, 0x0d, 0x32, 0x55,
-            0xbf, 0xef, 0x95, 0x60, 0x18, 0x90, 0xaf, 0xd8, 0x07, 0x09,
+            0xda, 0x39, 0xa3, 0xee, 0x5e, 0x6b, 0x4b, 0x0d, 0x32, 0x55, 0xbf, 0xef, 0x95, 0x60,
+            0x18, 0x90, 0xaf, 0xd8, 0x07, 0x09,
         ];
         assert_eq!(h, expected);
     }
@@ -237,8 +237,8 @@ mod tests {
     fn sha1_abc() {
         let h = sha1(b"abc");
         let expected = [
-            0xa9, 0x99, 0x3e, 0x36, 0x47, 0x06, 0x81, 0x6a, 0xba, 0x3e,
-            0x25, 0x71, 0x78, 0x50, 0xc2, 0x6c, 0x9c, 0xd0, 0xd8, 0x9d,
+            0xa9, 0x99, 0x3e, 0x36, 0x47, 0x06, 0x81, 0x6a, 0xba, 0x3e, 0x25, 0x71, 0x78, 0x50,
+            0xc2, 0x6c, 0x9c, 0xd0, 0xd8, 0x9d,
         ];
         assert_eq!(h, expected);
     }
@@ -247,8 +247,8 @@ mod tests {
     fn hotp_rfc4226_test_vectors() {
         // RFC 4226 Appendix D: Expected HOTP values
         let expected = [
-            755224, 287082, 359152, 969429, 338314,
-            254676, 287922, 162583, 399871, 520489,
+            755_224, 287_082, 359_152, 969_429, 338_314, 254_676, 287_922, 162_583, 399_871,
+            520_489,
         ];
         for (counter, &exp) in expected.iter().enumerate() {
             let code = generate_hotp(RFC_SECRET, counter as u64);
@@ -267,7 +267,7 @@ mod tests {
         // counter = 59/30 = 1
         let code = generate_totp(RFC_SECRET, 59, &config);
         // counter=1 → HOTP(1)=287082 (from RFC 4226)
-        assert_eq!(code, 287082);
+        assert_eq!(code, 287_082);
     }
 
     #[test]
@@ -296,7 +296,7 @@ mod tests {
     #[test]
     fn totp_reject_wrong_code() {
         let config = TotpConfig::default();
-        assert!(!verify_totp(RFC_SECRET, 90, &config, 999999));
+        assert!(!verify_totp(RFC_SECRET, 90, &config, 999_999));
     }
 
     #[test]
@@ -307,7 +307,7 @@ mod tests {
             skew: 0,
         };
         let code = generate_totp(RFC_SECRET, 0, &config); // counter=0
-        // counter=2 (t=60), skew=0 → reject
+                                                          // counter=2 (t=60), skew=0 → reject
         assert!(!verify_totp(RFC_SECRET, 60, &config, code));
     }
 
@@ -345,8 +345,8 @@ mod tests {
         let data = b"what do ya want for nothing?";
         let mac = hmac_sha1(key, data);
         let expected = [
-            0xef, 0xfc, 0xdf, 0x6a, 0xe5, 0xeb, 0x2f, 0xa2, 0xd2, 0x74,
-            0x16, 0xd5, 0xf1, 0x84, 0xdf, 0x9c, 0x25, 0x9a, 0x7c, 0x79,
+            0xef, 0xfc, 0xdf, 0x6a, 0xe5, 0xeb, 0x2f, 0xa2, 0xd2, 0x74, 0x16, 0xd5, 0xf1, 0x84,
+            0xdf, 0x9c, 0x25, 0x9a, 0x7c, 0x79,
         ];
         assert_eq!(mac, expected);
     }
