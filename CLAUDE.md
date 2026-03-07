@@ -12,7 +12,7 @@ Ed25519 認証 + Schnorr NIZK (真ZKP) for ALICE
 | リポジトリ | `ext-sakamoro/ALICE-Auth` |
 | デフォルト features | `["std"]` (no_std: `default-features = false`) |
 | crate-type | `["lib"]` (cdylib: `cargo rustc --crate-type cdylib`) |
-| テスト数 | 145 (0 clippy warnings, 0 fmt diff) |
+| テスト数 | 90 (default/std), 171 (all-features) |
 | Eco-Systemブリッジ | `bridge_auth.rs` (8), `bridge_auth_ext.rs` (9) |
 | Unity C# | `bindings/unity/AliceAuth.cs` (28 DllImport, 8クラス) |
 | UE5 C++ | `bindings/ue5/AliceAuth.h` (28 extern C, 8クラス RAII) |
