@@ -453,6 +453,128 @@ fn rotating_identity_current_key_always_verifiable() {
 }
 
 // ============================================================================
+// AliceSig
+// ============================================================================
+
+#[test]
+fn alice_sig_new_and_accessors() {
+    let bytes = [0xAB; 64];
+    let sig = AliceSig::new(bytes);
+    assert_eq!(*sig.as_bytes(), bytes);
+    assert_eq!(sig.into_bytes(), bytes);
+}
+
+#[test]
+fn alice_sig_equality() {
+    let a = AliceSig::new([0x11; 64]);
+    let b = AliceSig::new([0x11; 64]);
+    let c = AliceSig::new([0x22; 64]);
+    assert_eq!(a, b);
+    assert_ne!(a, c);
+}
+
+// ============================================================================
+// AliceId accessors
+// ============================================================================
+
+#[test]
+fn alice_id_new_as_bytes_into_bytes_roundtrip() {
+    let raw = [0xCC; 32];
+    let id = AliceId::new(raw);
+    assert_eq!(*id.as_bytes(), raw);
+    assert_eq!(id.into_bytes(), raw);
+}
+
+#[test]
+fn alice_id_equality_and_hash() {
+    use std::collections::HashSet;
+    let a = AliceId::new([0x01; 32]);
+    let b = AliceId::new([0x01; 32]);
+    let c = AliceId::new([0x02; 32]);
+    assert_eq!(a, b);
+    assert_ne!(a, c);
+    let mut set = HashSet::new();
+    set.insert(a);
+    assert!(set.contains(&b));
+    assert!(!set.contains(&c));
+}
+
+// ============================================================================
+// Identity seed roundtrip
+// ============================================================================
+
+#[test]
+fn identity_seed_roundtrip() {
+    let seed = [0x42u8; 32];
+    let id = Identity::from_seed(&seed);
+    assert_eq!(id.seed(), seed);
+}
+
+// ============================================================================
+// verify32 / ok edge cases
+// ============================================================================
+
+#[test]
+fn verify32_matches_verify_on_32_byte_message() {
+    let id = Identity::gen().unwrap();
+    let msg = [0xBB; 32];
+    let sig = id.sign(&msg);
+    assert!(alice_auth::verify32(&id.id(), &msg, &sig).is_ok());
+    assert!(verify(&id.id(), &msg, &sig).is_ok());
+}
+
+#[test]
+fn ok_returns_false_for_wrong_signer() {
+    let id1 = Identity::gen().unwrap();
+    let id2 = Identity::gen().unwrap();
+    let sig = id1.sign(b"test");
+    assert!(!ok(&id2.id(), b"test", &sig));
+}
+
+// ============================================================================
+// Protocol: hello
+// ============================================================================
+
+#[test]
+fn hello_version_is_one() {
+    let id = Identity::gen().unwrap();
+    let h = alice_auth::hello(&id);
+    assert_eq!(h.v, 1);
+    assert_eq!(h.id, id.id());
+}
+
+// ============================================================================
+// Trust chain: empty and single
+// ============================================================================
+
+#[test]
+fn verify_chain_empty_returns_false() {
+    let root = Identity::gen().unwrap();
+    assert!(!verify_chain(&[], &root.id(), 0));
+}
+
+#[test]
+fn verify_chain_single_valid() {
+    let root = Identity::gen().unwrap();
+    let leaf = Identity::gen().unwrap();
+    let e = endorse(&root, &leaf.id(), 0, 100_000);
+    assert!(verify_chain(&[e], &root.id(), 1000));
+}
+
+// ============================================================================
+// Endorsement tampered signature
+// ============================================================================
+
+#[test]
+fn endorsement_tampered_sig_is_invalid() {
+    let signer = Identity::gen().unwrap();
+    let target = Identity::gen().unwrap();
+    let mut e = endorse(&signer, &target.id(), 0, 100_000);
+    e.sig = AliceSig::new([0u8; 64]);
+    assert!(!verify_endorsement(&e, 500));
+}
+
+// ============================================================================
 // api_bridge tests
 // ============================================================================
 
