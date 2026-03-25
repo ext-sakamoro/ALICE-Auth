@@ -2,7 +2,7 @@
 name = "alice-auth"
 version = "0.5.0"
 edition = "2021"
-authors = ["Moroya Sakamoto"]
+authors = ["Moroya Sakamoto <sakamoro@alicelaw.net>"]
 description = "Ed25519 ZKP auth for ALICE"
 license = "AGPL-3.0"
 repository = "https://github.com/ext-sakamoro/ALICE-Auth"
