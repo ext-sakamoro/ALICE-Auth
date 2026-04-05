@@ -42,11 +42,11 @@ impl AuthToken {
 
     /// Serialize to bytes.
     #[must_use]
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(Self::SIZE);
-        buf.push(self.version);
-        buf.extend_from_slice(&self.expires_ms.to_le_bytes());
-        buf.extend_from_slice(&self.nonce_ms.to_le_bytes());
+    pub fn to_bytes(&self) -> [u8; Self::SIZE] {
+        let mut buf = [0u8; Self::SIZE];
+        buf[0] = self.version;
+        buf[1..9].copy_from_slice(&self.expires_ms.to_le_bytes());
+        buf[9..17].copy_from_slice(&self.nonce_ms.to_le_bytes());
         buf
     }
 
@@ -380,7 +380,7 @@ impl AuthMiddleware {
     /// Create a structured auth token with explicit timestamp.
     #[must_use]
     pub fn create_auth_token(now_ms: u64, ttl_ms: u64) -> Vec<u8> {
-        AuthToken::new(now_ms, ttl_ms).to_bytes()
+        AuthToken::new(now_ms, ttl_ms).to_bytes().to_vec()
     }
 
     /// Sliding window rate limiter.

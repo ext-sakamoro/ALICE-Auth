@@ -122,9 +122,9 @@ fn hmac_sha1(key: &[u8], message: &[u8]) -> [u8; 20] {
     let inner = sha1(&inner_data);
 
     // outer = SHA1(opad || inner)
-    let mut outer_data = Vec::with_capacity(BLOCK_SIZE + 20);
-    outer_data.extend_from_slice(&opad);
-    outer_data.extend_from_slice(&inner);
+    let mut outer_data = [0u8; BLOCK_SIZE + 20];
+    outer_data[..BLOCK_SIZE].copy_from_slice(&opad);
+    outer_data[BLOCK_SIZE..].copy_from_slice(&inner);
     sha1(&outer_data)
 }
 
