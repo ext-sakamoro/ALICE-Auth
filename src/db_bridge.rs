@@ -83,7 +83,7 @@ impl Default for AuthDbStore {
 }
 
 impl AuthDbStore {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             store: BTreeMap::new(),
             total_entries: 0,

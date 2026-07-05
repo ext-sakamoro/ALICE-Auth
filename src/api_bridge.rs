@@ -32,7 +32,7 @@ impl AuthToken {
 
     /// Create a new auth token with explicit timestamp.
     #[must_use]
-    pub fn new(now_ms: u64, ttl_ms: u64) -> Self {
+    pub const fn new(now_ms: u64, ttl_ms: u64) -> Self {
         Self {
             version: Self::V1,
             expires_ms: now_ms + ttl_ms,
@@ -71,7 +71,7 @@ impl AuthToken {
 
     /// Check if the token has expired.
     #[must_use]
-    pub fn is_expired(&self, now_ms: u64) -> bool {
+    pub const fn is_expired(&self, now_ms: u64) -> bool {
         now_ms > self.expires_ms
     }
 }
@@ -122,7 +122,7 @@ impl Default for RevocationList {
 }
 
 impl RevocationList {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             revoked: Vec::new(),
             max_capacity: DEFAULT_REVOCATION_CAPACITY,
@@ -180,11 +180,11 @@ impl RevocationList {
         before - self.revoked.len()
     }
 
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.revoked.len()
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.revoked.is_empty()
     }
 }
@@ -350,14 +350,13 @@ impl AuthMiddleware {
         let expires_ms = if let Some(token) = AuthToken::from_bytes(&req.token) {
             token.expires_ms
         } else {
-            let expires_bytes: [u8; 8] = match req.token[0..8].try_into() {
-                Ok(b) => b,
-                Err(_) => {
-                    self.denied_count += 1;
-                    return AuthResponse::Denied {
-                        reason: "Token byte conversion failed",
-                    };
-                }
+            let expires_bytes: [u8; 8] = if let Ok(b) = req.token[0..8].try_into() {
+                b
+            } else {
+                self.denied_count += 1;
+                return AuthResponse::Denied {
+                    reason: "Token byte conversion failed",
+                };
             };
             u64::from_le_bytes(expires_bytes)
         };

@@ -26,8 +26,8 @@ impl PyIdentity {
     /// Generate a new random identity.
     #[new]
     fn new() -> PyResult<Self> {
-        let inner = Identity::gen()
-            .map_err(|e| PyRuntimeError::new_err(format!("keygen failed: {}", e)))?;
+        let inner =
+            Identity::gen().map_err(|e| PyRuntimeError::new_err(format!("keygen failed: {e}")))?;
         Ok(Self { inner })
     }
 
@@ -117,7 +117,7 @@ impl PyAliceId {
         format!("AliceId({})", self.inner)
     }
 
-    fn __eq__(&self, other: &PyAliceId) -> bool {
+    fn __eq__(&self, other: &Self) -> bool {
         self.inner == other.inner
     }
 
@@ -169,7 +169,7 @@ fn verify32(id: &PyAliceId, challenge: &[u8], signature: &[u8]) -> PyResult<bool
 fn challenge() -> PyResult<Vec<u8>> {
     crate::challenge()
         .map(|c| c.to_vec())
-        .map_err(|e| PyRuntimeError::new_err(format!("RNG failed: {}", e)))
+        .map_err(|e| PyRuntimeError::new_err(format!("RNG failed: {e}")))
 }
 
 /// Server: create challenge for a client ID.
@@ -177,7 +177,7 @@ fn challenge() -> PyResult<Vec<u8>> {
 #[pyfunction]
 fn make_challenge(id: &PyAliceId) -> PyResult<(Vec<u8>, Vec<u8>)> {
     let pending = crate::make_challenge(id.inner)
-        .map_err(|e| PyRuntimeError::new_err(format!("challenge failed: {}", e)))?;
+        .map_err(|e| PyRuntimeError::new_err(format!("challenge failed: {e}")))?;
     Ok((pending.id.as_bytes().to_vec(), pending.c.to_vec()))
 }
 
@@ -227,8 +227,7 @@ fn verify_batch(
     for i in 0..ids.len() {
         if ids[i].len() != 32 || signatures[i].len() != 64 {
             return Err(PyValueError::new_err(format!(
-                "item {}: id must be 32 bytes, sig must be 64 bytes",
-                i
+                "item {i}: id must be 32 bytes, sig must be 64 bytes"
             )));
         }
         let mut id_arr = [0u8; 32];
@@ -258,7 +257,7 @@ fn verify_batch(
 #[pyfunction]
 fn nizk_prove(identity: &PyIdentity, message: &[u8]) -> PyResult<Vec<u8>> {
     let proof = crate::nizk::prove(&identity.inner, message)
-        .map_err(|e| PyRuntimeError::new_err(format!("NIZK prove failed: {}", e)))?;
+        .map_err(|e| PyRuntimeError::new_err(format!("NIZK prove failed: {e}")))?;
     Ok(proof.to_bytes().to_vec())
 }
 
@@ -291,14 +290,12 @@ fn nizk_verify_batch(
     for i in 0..ids.len() {
         if ids[i].len() != 32 {
             return Err(PyValueError::new_err(format!(
-                "item {}: id must be 32 bytes",
-                i
+                "item {i}: id must be 32 bytes"
             )));
         }
         if proofs[i].len() != 64 {
             return Err(PyValueError::new_err(format!(
-                "item {}: proof must be 64 bytes",
-                i
+                "item {i}: proof must be 64 bytes"
             )));
         }
         let mut id_arr = [0u8; 32];
@@ -393,7 +390,7 @@ impl PyRotatingIdentity {
     #[new]
     fn new() -> PyResult<Self> {
         let inner = crate::RotatingIdentity::gen()
-            .map_err(|e| PyRuntimeError::new_err(format!("keygen failed: {}", e)))?;
+            .map_err(|e| PyRuntimeError::new_err(format!("keygen failed: {e}")))?;
         Ok(Self { inner })
     }
 
@@ -402,7 +399,7 @@ impl PyRotatingIdentity {
         let id = self
             .inner
             .rotate(now_ms)
-            .map_err(|e| PyRuntimeError::new_err(format!("rotation failed: {}", e)))?;
+            .map_err(|e| PyRuntimeError::new_err(format!("rotation failed: {e}")))?;
         Ok(id.0.to_vec())
     }
 
@@ -433,7 +430,7 @@ impl PyRotatingIdentity {
     }
 
     /// Number of retained previous generations.
-    fn generation_count(&self) -> usize {
+    const fn generation_count(&self) -> usize {
         self.inner.generation_count()
     }
 
