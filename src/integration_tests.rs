@@ -10,17 +10,13 @@
 use crate::challenge_ttl::*;
 use crate::ct::*;
 use crate::errors::*;
-use crate::hex::*;
 use crate::identity::*;
-use crate::key_rotation::*;
 use crate::protocol::*;
 use crate::random::*;
 use crate::social_recovery::*;
 use crate::trust_chain::*;
 use crate::types::*;
 use crate::verify::*;
-
-use super::*;
 
 #[test]
 fn gen() {
