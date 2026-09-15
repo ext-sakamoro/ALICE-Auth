@@ -1,6 +1,8 @@
 [package]
 name = "alice-auth"
 version = "0.5.0"
+# slice::as_chunks (totp.rs) が 1.88 で stable、CI msrv job で実 compile (canonical 罠 #27)
+rust-version = "1.88"
 edition = "2021"
 authors = ["Moroya Sakamoto <sakamoro@alicelaw.net>"]
 description = "Ed25519 ZKP auth for ALICE"
@@ -18,11 +20,13 @@ default = ["std"]
 std = ["alloc", "getrandom/std"]
 alloc = []
 serde = ["dep:serde"]
-ffi = ["std"]
+ffi = ["std", "api"]  # src/ffi.rs が api_bridge::AuthToken を無条件使用 (2026-09-15 まで api 欠落で ffi 単独は compile 不能)
 pyo3 = ["dep:pyo3", "std"]  # Python bindings (no numpy needed)
 crypto = ["dep:alice-crypto", "std"]  # ALICE-Crypto token hashing + session encryption
 nizk = ["dep:curve25519-dalek", "crypto", "std"]  # Schnorr NIZK proof (true ZKP)
 db = ["std"]  # Auth audit log (self-contained BTreeMap store)
+# bare-metal (getrandom 非対応 target) 用: 最終 binary 側で getrandom::register_custom_getrandom! を登録
+custom-rng = ["getrandom/custom"]
 api = ["std"]  # ALICE-API auth middleware bridge
 
 [dependencies]

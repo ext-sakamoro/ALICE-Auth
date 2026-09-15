@@ -3,6 +3,7 @@
 pub use crate::challenge_ttl::*;
 pub use crate::errors::*;
 pub use crate::identity::*;
+#[cfg(feature = "std")]
 pub use crate::key_rotation::*;
 pub use crate::protocol::*;
 pub use crate::social_recovery::*;

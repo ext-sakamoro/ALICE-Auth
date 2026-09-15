@@ -57,6 +57,8 @@ pub mod ct;
 pub mod errors;
 pub mod hex;
 pub mod identity;
+/// Key rotation (`Vec` of previous generations、`std` 専用)
+#[cfg(feature = "std")]
 pub mod key_rotation;
 pub mod prelude;
 pub mod protocol;
@@ -104,6 +106,7 @@ pub use crate::challenge_ttl::*;
 pub use crate::ct::*;
 pub use crate::errors::*;
 pub use crate::identity::*;
+#[cfg(feature = "std")]
 pub use crate::key_rotation::*;
 pub use crate::protocol::*;
 pub use crate::random::*;
@@ -121,9 +124,6 @@ pub use crate::ffi_nizk::*;
 #[cfg(all(feature = "ffi", feature = "crypto"))]
 pub use crate::ffi_crypto::*;
 
-// no_std panic handler
-#[cfg(all(not(feature = "std"), not(test)))]
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop {}
-}
+// no_std の panic handler は library では定義しない: 最終 binary 側が 1 つだけ提供する
+// (library が持つと consumer の handler と `duplicate lang item: panic_impl` で link 不能、
+//  2026-09-15 まで `cfg(not(std), not(test))` で定義していた = bare-metal check を通すための偽装)

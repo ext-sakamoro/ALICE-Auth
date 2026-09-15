@@ -146,7 +146,7 @@ mod tests {
     fn test_audit_log_serialization() {
         let log = AuthAuditLog {
             identity_hash: [0xAB; 32],
-            timestamp_ms: 1234567890,
+            timestamp_ms: 1_234_567_890,
             action: AuthAction::Login,
             success: true,
             zkp_verified: true,

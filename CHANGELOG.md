@@ -2,6 +2,18 @@
 
 All notable changes to ALICE-Auth will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **`ffi` feature 単独 (`--features std,ffi`) が compile 不能だった** — `src/ffi.rs` が `api_bridge::AuthToken` を無条件使用するのに `ffi = ["std"]` に `api` が無かった → `ffi = ["std", "api"]` (feature-powerset で検出)
+- **library が `#[panic_handler]` を定義していた** (`cfg(not(std), not(test))`) — no_std consumer が自前の handler を持つと `duplicate lang item: panic_impl` で link 不能、削除 (最終 binary が提供、README no_std 節に明記)
+- no_std build の unused import (`key_rotation` は全て `std` gate なので module / re-export ごと `std` gate)、pedantic 1 件
+
+### Added
+- `custom-rng` feature (`getrandom/custom`) — `getrandom` が非対応の bare-metal target 向け (README)
+- `rust-version = "1.88"` (`slice::as_chunks`、`cargo +1.88 check` green / 1.87 red を実測) + `rust-toolchain.toml` に thumbv7em target
+- `ci.yml`: fmt + actionlint のみ → test (default + `std,serde,ffi,db,api`) / clippy `--all-targets` pedantic `-D warnings` 2 variant / `no_std` job (host no-alloc / alloc / thumbv7em `custom-rng` + clippy) / `msrv` 1.88 / `feature-powerset` (std 固定 depth 2) / doc `-D warnings`、rust-cache
+
 ## [0.5.0] - 2026-03-04
 
 ### Added — Security Hardening (Round 1)

@@ -52,6 +52,18 @@ alice-auth = "0.5"                    # includes std (default)
 alice-auth = { version = "0.5", default-features = false }  # no_std (embedded/WASM)
 ```
 
+`no_std` notes:
+
+- The library does **not** define a `#[panic_handler]`; the final binary provides one.
+- Targets that `getrandom` does not support (e.g. `thumbv7em-none-eabihf`) need the
+  `custom-rng` feature and a registered entropy source in the final binary
+  (`getrandom::register_custom_getrandom!`, see the getrandom docs):
+
+```toml
+[dependencies]
+alice-auth = { version = "0.5", default-features = false, features = ["custom-rng"] }
+```
+
 ## Testing
 
 ```bash
