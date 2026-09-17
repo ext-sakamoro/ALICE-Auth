@@ -1,6 +1,6 @@
 [package]
 name = "alice-auth"
-version = "0.5.0"
+version = "0.5.1"
 # slice::as_chunks (totp.rs) が 1.88 で stable、CI msrv job で実 compile (canonical 罠 #27)
 rust-version = "1.88"
 edition = "2021"

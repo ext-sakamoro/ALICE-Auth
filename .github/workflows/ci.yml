@@ -36,6 +36,11 @@ jobs:
         run: cargo test
       - name: Test (full native feature set)
         run: cargo test --features "$NATIVE_FEATURES"
+      # 0.5.1: `#[cfg(debug_assertions)]` で gate した hex helper を無条件 import していて
+      # release build が E0432 だった (0.5.0 は crates.io に release 不能のまま公開)
+      # debug しか build しない CI では見えないので release でも test する
+      - name: Test (release、full native feature set)
+        run: cargo test --release --features "$NATIVE_FEATURES"
 
   clippy:
     name: Clippy (all targets, pedantic, -D warnings)

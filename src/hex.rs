@@ -5,7 +5,6 @@
 
 const H: [u8; 16] = *b"0123456789abcdef";
 
-#[cfg(debug_assertions)]
 #[inline(always)]
 pub(crate) fn hex4(s: &[u8], d: &mut [u8; 8]) {
     d[0] = H[(s[0] >> 4) as usize];
@@ -18,7 +17,6 @@ pub(crate) fn hex4(s: &[u8], d: &mut [u8; 8]) {
     d[7] = H[(s[3] & 0xf) as usize];
 }
 
-#[cfg(debug_assertions)]
 #[inline(always)]
 pub(crate) fn hex8(s: &[u8], d: &mut [u8; 16]) {
     d[0] = H[(s[0] >> 4) as usize];

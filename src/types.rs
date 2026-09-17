@@ -70,7 +70,6 @@ impl AliceId {
     }
 }
 
-#[cfg(debug_assertions)]
 impl fmt::Debug for AliceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut h = [0u8; 8];
@@ -78,13 +77,6 @@ impl fmt::Debug for AliceId {
         f.write_str("Id(")?;
         f.write_str(unsafe { core::str::from_utf8_unchecked(&h) })?;
         f.write_str(")")
-    }
-}
-#[cfg(not(debug_assertions))]
-impl fmt::Debug for AliceId {
-    #[inline(always)]
-    fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Ok(())
     }
 }
 
@@ -120,7 +112,6 @@ impl AliceSig {
     }
 }
 
-#[cfg(debug_assertions)]
 impl fmt::Debug for AliceSig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut h = [0u8; 16];
@@ -128,13 +119,6 @@ impl fmt::Debug for AliceSig {
         f.write_str("Sig(")?;
         f.write_str(unsafe { core::str::from_utf8_unchecked(&h) })?;
         f.write_str(")")
-    }
-}
-#[cfg(not(debug_assertions))]
-impl fmt::Debug for AliceSig {
-    #[inline(always)]
-    fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Ok(())
     }
 }
 

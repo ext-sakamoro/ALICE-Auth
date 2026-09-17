@@ -2,6 +2,13 @@
 
 All notable changes to ALICE-Auth will be documented in this file.
 
+## [0.5.1] - 2026-09-17
+
+### Fixed
+- **release build が compile 不能だった** (0.5.0 は crates.io に release 不能のまま公開): `hex::hex4` / `hex8` が `#[cfg(debug_assertions)]` gate なのに `types.rs` が無条件 import (E0432) gate を撤去
+- `Debug for AliceId / AliceSig` と `Display for AuthError` の release 側 silent no-op impl (何も出力しない) を撤去し、build profile に依らず同じ出力にする (release だけ `Debug` が空になる API 不整合の解消)
+- CI に `cargo test --release` を追加 (debug しか build しない CI では上記が見えなかった)
+
 ## [Unreleased]
 
 ### Fixed

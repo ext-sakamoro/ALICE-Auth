@@ -20,16 +20,9 @@ pub enum AuthError {
 impl fmt::Display for AuthError {
     #[inline(always)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        #[cfg(debug_assertions)]
-        {
-            let c = [b'E', b'0' + (*self as u8)];
-            f.write_str(unsafe { core::str::from_utf8_unchecked(&c) })
-        }
-        #[cfg(not(debug_assertions))]
-        {
-            let _ = f;
-            Ok(())
-        }
+        // 0.5.1: release でも同じ出力 (以前は release で空文字列 = silent no-op)
+        let c = [b'E', b'0' + (*self as u8)];
+        f.write_str(unsafe { core::str::from_utf8_unchecked(&c) })
     }
 }
 
