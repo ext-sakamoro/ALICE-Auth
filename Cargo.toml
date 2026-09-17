@@ -8,6 +8,8 @@ authors = ["Moroya Sakamoto <sakamoro@alicelaw.net>"]
 description = "Ed25519 ZKP auth for ALICE"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/ext-sakamoro/ALICE-Auth"
+homepage = "https://github.com/ext-sakamoro/ALICE-Auth"
+documentation = "https://docs.rs/alice-auth"
 keywords = ["auth", "ed25519", "zkp", "no_std"]
 categories = ["cryptography", "no-std"]
 
