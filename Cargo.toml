@@ -44,7 +44,8 @@ curve25519-dalek = { version = "4", default-features = false, optional = true, f
 [profile.release]
 lto = "fat"
 codegen-units = 1
-panic = "abort"
+# panic = "abort" は撤去 (2026-09-17): FFI の catch_unwind (src/ffi.rs guard) は
+# unwind でしか機能せず、abort だと host process ごと落ちる
 opt-level = 3
 strip = true
 

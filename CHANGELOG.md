@@ -2,6 +2,11 @@
 
 All notable changes to ALICE-Auth will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **FFI 28 関数の panic 隔離** (`ffi.rs` / `ffi_nizk.rs` / `ffi_crypto.rs`): 全 `extern "C"` の本体を `ffi_guard(sentinel, || ..)` で包み、panic は host を落とさず sentinel + `aa_last_error()` (新規、`aa_clear_last_error` / `aa_free_error_string` も) で通知 認可系 (`aa_verify*` / `aa_policy_check` = 0、`aa_token_is_expired` = 1、`aa_revlist_is_revoked` = **1 = revoked**) は panic 時 fail-closed `[profile.release] panic = "abort"` を撤去 (abort では `catch_unwind` が機能しない) release profile で guard test 通過
+
 ## [0.5.1] - 2026-09-17
 
 ### Fixed

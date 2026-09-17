@@ -30,23 +30,25 @@ pub unsafe extern "C" fn aa_nizk_prove(
     ml: usize,
     out: *mut u8,
 ) -> i32 {
-    if h.is_null() || m.is_null() || out.is_null() {
-        null_ptr();
-        return 0;
-    }
-    const MAX_MSG_LEN: usize = 64 * 1024 * 1024;
-    if ml > MAX_MSG_LEN {
-        return 0;
-    }
-    let msg = core::slice::from_raw_parts(m, ml);
-    match crate::nizk::prove(&(*h).0, msg) {
-        Ok(proof) => {
-            let bytes = proof.to_bytes();
-            core::ptr::copy_nonoverlapping(bytes.as_ptr(), out, 64);
-            1
+    ffi_guard(0, || {
+        if h.is_null() || m.is_null() || out.is_null() {
+            null_ptr();
+            return 0;
         }
-        Err(_) => 0,
-    }
+        const MAX_MSG_LEN: usize = 64 * 1024 * 1024;
+        if ml > MAX_MSG_LEN {
+            return 0;
+        }
+        let msg = core::slice::from_raw_parts(m, ml);
+        match crate::nizk::prove(&(*h).0, msg) {
+            Ok(proof) => {
+                let bytes = proof.to_bytes();
+                core::ptr::copy_nonoverlapping(bytes.as_ptr(), out, 64);
+                1
+            }
+            Err(_) => 0,
+        }
+    })
 }
 
 /// Verify a Schnorr NIZK proof. Returns 1 if valid, 0 otherwise.
@@ -63,18 +65,22 @@ pub unsafe extern "C" fn aa_nizk_verify(
     ml: usize,
     proof: *const u8,
 ) -> i32 {
-    if pk.is_null() || m.is_null() || proof.is_null() {
-        null_ptr();
-        return 0;
-    }
-    const MAX_MSG_LEN: usize = 64 * 1024 * 1024;
-    if ml > MAX_MSG_LEN {
-        return 0;
-    }
-    let id = AliceId(r32(pk));
-    let msg = core::slice::from_raw_parts(m, ml);
-    let mut proof_bytes = [0u8; 64];
-    core::ptr::copy_nonoverlapping(proof, proof_bytes.as_mut_ptr(), 64);
-    let p = crate::nizk::SchnorrProof::from_bytes(&proof_bytes);
-    crate::nizk::verify_proof(&id, msg, &p) as i32
+    ffi_guard(0, || {
+        if pk.is_null() || m.is_null() || proof.is_null() {
+            null_ptr();
+            return 0;
+        }
+        const MAX_MSG_LEN: usize = 64 * 1024 * 1024;
+        if ml > MAX_MSG_LEN {
+            return 0;
+        }
+        let id = AliceId(r32(pk));
+        let msg = core::slice::from_raw_parts(m, ml);
+        let mut proof_bytes = [0u8; 64];
+        core::ptr::copy_nonoverlapping(proof, proof_bytes.as_mut_ptr(), 64);
+        let p = crate::nizk::SchnorrProof::from_bytes(&proof_bytes);
+        crate::nizk::verify_proof(&id, msg, &p) as i32
+    })
 }
+
+use crate::ffi::guard::ffi_guard;

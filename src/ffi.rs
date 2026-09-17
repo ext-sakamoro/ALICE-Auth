@@ -5,6 +5,7 @@ use crate::trust_chain::*;
 use crate::types::*;
 use crate::verify::*;
 use std::boxed::Box;
+use std::ptr;
 #[repr(C)]
 pub struct Handle(pub(crate) Identity);
 #[cold]
@@ -32,12 +33,14 @@ const unsafe fn w64(s: &[u8; 64], d: *mut u8) {
 }
 #[no_mangle]
 pub extern "C" fn aa_new() -> *mut Handle {
-    if let Ok(i) = Identity::gen() {
-        Box::into_raw(Box::new(Handle(i)))
-    } else {
-        null_ptr();
-        core::ptr::null_mut()
-    }
+    ffi_guard(ptr::null_mut(), || {
+        if let Ok(i) = Identity::gen() {
+            Box::into_raw(Box::new(Handle(i)))
+        } else {
+            null_ptr();
+            core::ptr::null_mut()
+        }
+    })
 }
 /// Write the 32-byte public identity into `o`.
 ///
@@ -47,11 +50,13 @@ pub extern "C" fn aa_new() -> *mut Handle {
 /// - `o` must point to at least 32 writable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn aa_id(h: *const Handle, o: *mut u8) {
-    if h.is_null() || o.is_null() {
-        null_ptr();
-        return;
-    }
-    w32(&(*h).0.id().0, o);
+    ffi_guard((), || {
+        if h.is_null() || o.is_null() {
+            null_ptr();
+            return;
+        }
+        w32(&(*h).0.id().0, o);
+    });
 }
 /// Sign a 32-byte challenge and write the 64-byte signature into `o`.
 ///
@@ -62,11 +67,13 @@ pub unsafe extern "C" fn aa_id(h: *const Handle, o: *mut u8) {
 /// - `o` must point to at least 64 writable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn aa_sign(h: *const Handle, c: *const u8, o: *mut u8) {
-    if h.is_null() || c.is_null() || o.is_null() {
-        null_ptr();
-        return;
-    }
-    w64(&(*h).0.sign32(&r32(c)).0, o);
+    ffi_guard((), || {
+        if h.is_null() || c.is_null() || o.is_null() {
+            null_ptr();
+            return;
+        }
+        w64(&(*h).0.sign32(&r32(c)).0, o);
+    });
 }
 /// Verify an Ed25519 signature over a message.
 ///
@@ -80,23 +87,25 @@ pub unsafe extern "C" fn aa_sign(h: *const Handle, c: *const u8, o: *mut u8) {
 /// - All pointers must remain valid for the duration of this call.
 #[no_mangle]
 pub unsafe extern "C" fn aa_verify(pk: *const u8, m: *const u8, ml: usize, s: *const u8) -> i32 {
-    if pk.is_null() || m.is_null() || s.is_null() {
-        null_ptr();
-        return 0;
-    }
-    // Reject absurd lengths to prevent UB from from_raw_parts.
-    // isize::MAX is the Rust safety invariant; 64 MiB is the practical cap.
-    const MAX_MSG_LEN: usize = 64 * 1024 * 1024;
-    if ml > MAX_MSG_LEN {
-        return 0;
-    }
-    // SAFETY: m is non-null (checked above), ml is within MAX_MSG_LEN,
-    // and the caller guarantees m points to at least ml valid bytes.
-    ok(
-        &AliceId(r32(pk)),
-        core::slice::from_raw_parts(m, ml),
-        &AliceSig(r64(s)),
-    ) as i32
+    ffi_guard(0, || {
+        if pk.is_null() || m.is_null() || s.is_null() {
+            null_ptr();
+            return 0;
+        }
+        // Reject absurd lengths to prevent UB from from_raw_parts.
+        // isize::MAX is the Rust safety invariant; 64 MiB is the practical cap.
+        const MAX_MSG_LEN: usize = 64 * 1024 * 1024;
+        if ml > MAX_MSG_LEN {
+            return 0;
+        }
+        // SAFETY: m is non-null (checked above), ml is within MAX_MSG_LEN,
+        // and the caller guarantees m points to at least ml valid bytes.
+        ok(
+            &AliceId(r32(pk)),
+            core::slice::from_raw_parts(m, ml),
+            &AliceSig(r64(s)),
+        ) as i32
+    })
 }
 /// Free a handle previously created by [`aa_new`].
 ///
@@ -106,11 +115,13 @@ pub unsafe extern "C" fn aa_verify(pk: *const u8, m: *const u8, ml: usize, s: *c
 /// - Must not be called twice on the same pointer (double-free).
 #[no_mangle]
 pub unsafe extern "C" fn aa_free(h: *mut Handle) {
-    if h.is_null() {
-        null_ptr();
-        return;
-    }
-    drop(Box::from_raw(h));
+    ffi_guard((), || {
+        if h.is_null() {
+            null_ptr();
+            return;
+        }
+        drop(Box::from_raw(h));
+    });
 }
 // ========================================================================
 // Endorsement FFI
@@ -132,19 +143,21 @@ pub unsafe extern "C" fn aa_endorse(
     ttl_ms: u64,
     out: *mut u8,
 ) {
-    if h.is_null() || target.is_null() || out.is_null() {
-        null_ptr();
-        return;
-    }
-    let target_id = AliceId(r32(target));
-    let e = super::endorse(&(*h).0, &target_id, now_ms, ttl_ms);
-    let buf = core::slice::from_raw_parts_mut(out, 176);
-    buf[0..32].copy_from_slice(&e.endorser.0);
-    buf[32..64].copy_from_slice(&e.endorsed.0);
-    buf[64..128].copy_from_slice(&e.sig.0);
-    buf[128..136].copy_from_slice(&e.issued_ms.to_le_bytes());
-    buf[136..144].copy_from_slice(&e.expires_ms.to_le_bytes());
-    buf[144..176].fill(0);
+    ffi_guard((), || {
+        if h.is_null() || target.is_null() || out.is_null() {
+            null_ptr();
+            return;
+        }
+        let target_id = AliceId(r32(target));
+        let e = super::endorse(&(*h).0, &target_id, now_ms, ttl_ms);
+        let buf = core::slice::from_raw_parts_mut(out, 176);
+        buf[0..32].copy_from_slice(&e.endorser.0);
+        buf[32..64].copy_from_slice(&e.endorsed.0);
+        buf[64..128].copy_from_slice(&e.sig.0);
+        buf[128..136].copy_from_slice(&e.issued_ms.to_le_bytes());
+        buf[136..144].copy_from_slice(&e.expires_ms.to_le_bytes());
+        buf[144..176].fill(0);
+    });
 }
 /// Verify an endorsement. Returns 1 if valid, 0 otherwise.
 ///
@@ -153,19 +166,21 @@ pub unsafe extern "C" fn aa_endorse(
 /// - `data` must point to at least 176 readable bytes (serialized endorsement).
 #[no_mangle]
 pub unsafe extern "C" fn aa_verify_endorsement(data: *const u8, now_ms: u64) -> i32 {
-    if data.is_null() {
-        null_ptr();
-        return 0;
-    }
-    let buf = core::slice::from_raw_parts(data, 144);
-    let e = Endorsement {
-        endorser: AliceId(r32(buf.as_ptr())),
-        endorsed: AliceId(r32(buf.as_ptr().add(32))),
-        sig: AliceSig(r64(buf.as_ptr().add(64))),
-        issued_ms: u64::from_le_bytes(buf[128..136].try_into().unwrap()),
-        expires_ms: u64::from_le_bytes(buf[136..144].try_into().unwrap()),
-    };
-    super::verify_endorsement(&e, now_ms) as i32
+    ffi_guard(0, || {
+        if data.is_null() {
+            null_ptr();
+            return 0;
+        }
+        let buf = core::slice::from_raw_parts(data, 144);
+        let e = Endorsement {
+            endorser: AliceId(r32(buf.as_ptr())),
+            endorsed: AliceId(r32(buf.as_ptr().add(32))),
+            sig: AliceSig(r64(buf.as_ptr().add(64))),
+            issued_ms: u64::from_le_bytes(buf[128..136].try_into().unwrap()),
+            expires_ms: u64::from_le_bytes(buf[136..144].try_into().unwrap()),
+        };
+        super::verify_endorsement(&e, now_ms) as i32
+    })
 }
 // ========================================================================
 // RotatingIdentity FFI
@@ -175,12 +190,14 @@ pub struct RotHandle(super::RotatingIdentity);
 /// Create a new RotatingIdentity. Returns null on RNG failure.
 #[no_mangle]
 pub extern "C" fn aa_rotating_new() -> *mut RotHandle {
-    if let Ok(r) = super::RotatingIdentity::gen() {
-        Box::into_raw(Box::new(RotHandle(r)))
-    } else {
-        null_ptr();
-        core::ptr::null_mut()
-    }
+    ffi_guard(ptr::null_mut(), || {
+        if let Ok(r) = super::RotatingIdentity::gen() {
+            Box::into_raw(Box::new(RotHandle(r)))
+        } else {
+            null_ptr();
+            core::ptr::null_mut()
+        }
+    })
 }
 /// Rotate to a new keypair. Writes the new 32-byte public ID to `out`.
 ///
@@ -190,17 +207,19 @@ pub extern "C" fn aa_rotating_new() -> *mut RotHandle {
 /// - `out` must point to at least 32 writable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn aa_rotating_rotate(h: *mut RotHandle, now_ms: u64, out: *mut u8) -> i32 {
-    if h.is_null() || out.is_null() {
-        null_ptr();
-        return 0;
-    }
-    match (*h).0.rotate(now_ms) {
-        Ok(id) => {
-            w32(&id.0, out);
-            1
+    ffi_guard(0, || {
+        if h.is_null() || out.is_null() {
+            null_ptr();
+            return 0;
         }
-        Err(_) => 0,
-    }
+        match (*h).0.rotate(now_ms) {
+            Ok(id) => {
+                w32(&id.0, out);
+                1
+            }
+            Err(_) => 0,
+        }
+    })
 }
 /// Get the current public ID (32 bytes).
 ///
@@ -210,11 +229,13 @@ pub unsafe extern "C" fn aa_rotating_rotate(h: *mut RotHandle, now_ms: u64, out:
 /// - `out` must point to at least 32 writable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn aa_rotating_id(h: *const RotHandle, out: *mut u8) {
-    if h.is_null() || out.is_null() {
-        null_ptr();
-        return;
-    }
-    w32(&(*h).0.id().0, out);
+    ffi_guard((), || {
+        if h.is_null() || out.is_null() {
+            null_ptr();
+            return;
+        }
+        w32(&(*h).0.id().0, out);
+    });
 }
 /// Verify a signature against any key (current + all previous).
 ///
@@ -230,18 +251,20 @@ pub unsafe extern "C" fn aa_rotating_verify(
     ml: usize,
     s: *const u8,
 ) -> i32 {
-    if h.is_null() || pk.is_null() || m.is_null() || s.is_null() {
-        null_ptr();
-        return 0;
-    }
-    const MAX_MSG_LEN: usize = 64 * 1024 * 1024;
-    if ml > MAX_MSG_LEN {
-        return 0;
-    }
-    let id = AliceId(r32(pk));
-    let msg = core::slice::from_raw_parts(m, ml);
-    let sig = AliceSig(r64(s));
-    (*h).0.verify_any(&id, msg, &sig) as i32
+    ffi_guard(0, || {
+        if h.is_null() || pk.is_null() || m.is_null() || s.is_null() {
+            null_ptr();
+            return 0;
+        }
+        const MAX_MSG_LEN: usize = 64 * 1024 * 1024;
+        if ml > MAX_MSG_LEN {
+            return 0;
+        }
+        let id = AliceId(r32(pk));
+        let msg = core::slice::from_raw_parts(m, ml);
+        let sig = AliceSig(r64(s));
+        (*h).0.verify_any(&id, msg, &sig) as i32
+    })
 }
 /// Return the number of retained previous generations.
 ///
@@ -250,11 +273,13 @@ pub unsafe extern "C" fn aa_rotating_verify(
 /// - `h` must be a valid `RotHandle` pointer.
 #[no_mangle]
 pub unsafe extern "C" fn aa_rotating_generation_count(h: *const RotHandle) -> u32 {
-    if h.is_null() {
-        null_ptr();
-        return 0;
-    }
-    (*h).0.generation_count() as u32
+    ffi_guard(0, || {
+        if h.is_null() {
+            null_ptr();
+            return 0;
+        }
+        (*h).0.generation_count() as u32
+    })
 }
 /// Free a RotatingIdentity handle.
 ///
@@ -263,11 +288,13 @@ pub unsafe extern "C" fn aa_rotating_generation_count(h: *const RotHandle) -> u3
 /// - `h` must be a valid pointer from `aa_rotating_new`, or null.
 #[no_mangle]
 pub unsafe extern "C" fn aa_rotating_free(h: *mut RotHandle) {
-    if h.is_null() {
-        null_ptr();
-        return;
-    }
-    drop(Box::from_raw(h));
+    ffi_guard((), || {
+        if h.is_null() {
+            null_ptr();
+            return;
+        }
+        drop(Box::from_raw(h));
+    });
 }
 // ========================================================================
 // AuthToken FFI
@@ -279,13 +306,15 @@ pub unsafe extern "C" fn aa_rotating_free(h: *mut RotHandle) {
 /// - `out` must point to at least 17 writable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn aa_token_create(now_ms: u64, ttl_ms: u64, out: *mut u8) {
-    if out.is_null() {
-        null_ptr();
-        return;
-    }
-    let token = crate::api_bridge::AuthToken::new(now_ms, ttl_ms);
-    let bytes = token.to_bytes();
-    core::ptr::copy_nonoverlapping(bytes.as_ptr(), out, 17);
+    ffi_guard((), || {
+        if out.is_null() {
+            null_ptr();
+            return;
+        }
+        let token = crate::api_bridge::AuthToken::new(now_ms, ttl_ms);
+        let bytes = token.to_bytes();
+        core::ptr::copy_nonoverlapping(bytes.as_ptr(), out, 17);
+    });
 }
 /// Check if a token is expired. Returns 1 if expired, 0 if valid.
 ///
@@ -294,15 +323,17 @@ pub unsafe extern "C" fn aa_token_create(now_ms: u64, ttl_ms: u64, out: *mut u8)
 /// - `data` must point to at least 17 readable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn aa_token_is_expired(data: *const u8, now_ms: u64) -> i32 {
-    if data.is_null() {
-        null_ptr();
-        return 1;
-    }
-    let buf = core::slice::from_raw_parts(data, 17);
-    match crate::api_bridge::AuthToken::from_bytes(buf) {
-        Some(t) => t.is_expired(now_ms) as i32,
-        None => 1,
-    }
+    ffi_guard(1, || {
+        if data.is_null() {
+            null_ptr();
+            return 1;
+        }
+        let buf = core::slice::from_raw_parts(data, 17);
+        match crate::api_bridge::AuthToken::from_bytes(buf) {
+            Some(t) => t.is_expired(now_ms) as i32,
+            None => 1,
+        }
+    })
 }
 // ========================================================================
 // RevocationList FFI
@@ -312,9 +343,11 @@ pub struct RevHandle(crate::api_bridge::RevocationList);
 /// Create a new RevocationList with default capacity.
 #[no_mangle]
 pub extern "C" fn aa_revlist_new() -> *mut RevHandle {
-    Box::into_raw(Box::new(
-        RevHandle(crate::api_bridge::RevocationList::new()),
-    ))
+    ffi_guard(ptr::null_mut(), || {
+        Box::into_raw(Box::new(
+            RevHandle(crate::api_bridge::RevocationList::new()),
+        ))
+    })
 }
 /// Revoke a 16-byte token.
 ///
@@ -324,13 +357,15 @@ pub extern "C" fn aa_revlist_new() -> *mut RevHandle {
 /// - `token` must point to at least 16 readable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn aa_revlist_revoke(h: *mut RevHandle, token: *const u8, now_ms: u64) {
-    if h.is_null() || token.is_null() {
-        null_ptr();
-        return;
-    }
-    let mut t = [0u8; 16];
-    core::ptr::copy_nonoverlapping(token, t.as_mut_ptr(), 16);
-    (*h).0.revoke(&t, now_ms);
+    ffi_guard((), || {
+        if h.is_null() || token.is_null() {
+            null_ptr();
+            return;
+        }
+        let mut t = [0u8; 16];
+        core::ptr::copy_nonoverlapping(token, t.as_mut_ptr(), 16);
+        (*h).0.revoke(&t, now_ms);
+    });
 }
 /// Check if a 16-byte token is revoked. Returns 1 if revoked, 0 otherwise.
 ///
@@ -340,13 +375,16 @@ pub unsafe extern "C" fn aa_revlist_revoke(h: *mut RevHandle, token: *const u8, 
 /// - `token` must point to at least 16 readable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn aa_revlist_is_revoked(h: *const RevHandle, token: *const u8) -> i32 {
-    if h.is_null() || token.is_null() {
-        null_ptr();
-        return 0;
-    }
-    let mut t = [0u8; 16];
-    core::ptr::copy_nonoverlapping(token, t.as_mut_ptr(), 16);
-    (*h).0.is_revoked(&t) as i32
+    // panic 時は fail-closed (= revoked 扱い): 認可判定の既定を「拒否」側に倒す
+    ffi_guard(1, || {
+        if h.is_null() || token.is_null() {
+            null_ptr();
+            return 0;
+        }
+        let mut t = [0u8; 16];
+        core::ptr::copy_nonoverlapping(token, t.as_mut_ptr(), 16);
+        (*h).0.is_revoked(&t) as i32
+    })
 }
 /// Auto-purge expired tokens. Returns number purged.
 ///
@@ -355,11 +393,13 @@ pub unsafe extern "C" fn aa_revlist_is_revoked(h: *const RevHandle, token: *cons
 /// - `h` must be a valid `RevHandle` pointer.
 #[no_mangle]
 pub unsafe extern "C" fn aa_revlist_auto_purge(h: *mut RevHandle, now_ms: u64, ttl_ms: u64) -> u32 {
-    if h.is_null() {
-        null_ptr();
-        return 0;
-    }
-    (*h).0.auto_purge(now_ms, ttl_ms) as u32
+    ffi_guard(0, || {
+        if h.is_null() {
+            null_ptr();
+            return 0;
+        }
+        (*h).0.auto_purge(now_ms, ttl_ms) as u32
+    })
 }
 /// Free a RevocationList handle.
 ///
@@ -368,11 +408,13 @@ pub unsafe extern "C" fn aa_revlist_auto_purge(h: *mut RevHandle, now_ms: u64, t
 /// - `h` must be a valid pointer from `aa_revlist_new`, or null.
 #[no_mangle]
 pub unsafe extern "C" fn aa_revlist_free(h: *mut RevHandle) {
-    if h.is_null() {
-        null_ptr();
-        return;
-    }
-    drop(Box::from_raw(h));
+    ffi_guard((), || {
+        if h.is_null() {
+            null_ptr();
+            return;
+        }
+        drop(Box::from_raw(h));
+    });
 }
 // ========================================================================
 // RBAC (PolicyEngine) FFI
@@ -382,9 +424,11 @@ pub struct PolicyHandle(crate::api_bridge::PolicyEngine);
 /// Create a PolicyEngine with read-only default role.
 #[no_mangle]
 pub extern "C" fn aa_policy_new() -> *mut PolicyHandle {
-    Box::into_raw(Box::new(PolicyHandle(
-        crate::api_bridge::PolicyEngine::new(crate::api_bridge::Role::READER),
-    )))
+    ffi_guard(ptr::null_mut(), || {
+        Box::into_raw(Box::new(PolicyHandle(
+            crate::api_bridge::PolicyEngine::new(crate::api_bridge::Role::READER),
+        )))
+    })
 }
 /// Assign a role mask to an identity.
 ///
@@ -394,12 +438,14 @@ pub extern "C" fn aa_policy_new() -> *mut PolicyHandle {
 /// - `id` must point to 32 readable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn aa_policy_assign(h: *mut PolicyHandle, id: *const u8, mask: u8) {
-    if h.is_null() || id.is_null() {
-        null_ptr();
-        return;
-    }
-    let aid = AliceId(r32(id));
-    (*h).0.assign(&aid, crate::api_bridge::Role { mask });
+    ffi_guard((), || {
+        if h.is_null() || id.is_null() {
+            null_ptr();
+            return;
+        }
+        let aid = AliceId(r32(id));
+        (*h).0.assign(&aid, crate::api_bridge::Role { mask });
+    });
 }
 /// Check if an identity has a specific permission (0=Read,1=Write,2=Admin,3=Execute).
 /// Returns 1 if authorized, 0 otherwise.
@@ -410,19 +456,21 @@ pub unsafe extern "C" fn aa_policy_assign(h: *mut PolicyHandle, id: *const u8, m
 /// - `id` must point to 32 readable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn aa_policy_check(h: *const PolicyHandle, id: *const u8, perm: u8) -> i32 {
-    if h.is_null() || id.is_null() {
-        null_ptr();
-        return 0;
-    }
-    let aid = AliceId(r32(id));
-    let permission = match perm {
-        0 => crate::api_bridge::Permission::Read,
-        1 => crate::api_bridge::Permission::Write,
-        2 => crate::api_bridge::Permission::Admin,
-        3 => crate::api_bridge::Permission::Execute,
-        _ => return 0,
-    };
-    (*h).0.authorize(&aid, permission) as i32
+    ffi_guard(0, || {
+        if h.is_null() || id.is_null() {
+            null_ptr();
+            return 0;
+        }
+        let aid = AliceId(r32(id));
+        let permission = match perm {
+            0 => crate::api_bridge::Permission::Read,
+            1 => crate::api_bridge::Permission::Write,
+            2 => crate::api_bridge::Permission::Admin,
+            3 => crate::api_bridge::Permission::Execute,
+            _ => return 0,
+        };
+        (*h).0.authorize(&aid, permission) as i32
+    })
 }
 /// Free a PolicyEngine handle.
 ///
@@ -431,9 +479,169 @@ pub unsafe extern "C" fn aa_policy_check(h: *const PolicyHandle, id: *const u8, 
 /// - `h` must be a valid pointer from `aa_policy_new`, or null.
 #[no_mangle]
 pub unsafe extern "C" fn aa_policy_free(h: *mut PolicyHandle) {
-    if h.is_null() {
-        null_ptr();
-        return;
+    ffi_guard((), || {
+        if h.is_null() {
+            null_ptr();
+            return;
+        }
+        drop(Box::from_raw(h));
+    });
+}
+
+// ============================================================================
+// Panic isolation (see `guard`)
+// ============================================================================
+
+/// Message of the most recent panic caught at the FFI boundary on this thread
+/// (NUL-terminated, owned by the callee — release with
+/// `aa_free_error_string`), or null if none.
+#[no_mangle]
+pub extern "C" fn aa_last_error() -> *mut std::os::raw::c_char {
+    ffi_guard(ptr::null_mut(), || match guard::take_last_error() {
+        Some(msg) => {
+            std::ffi::CString::new(msg).map_or(ptr::null_mut(), std::ffi::CString::into_raw)
+        }
+        None => ptr::null_mut(),
+    })
+}
+
+/// Clear the most recent FFI error message.
+#[no_mangle]
+pub extern "C" fn aa_clear_last_error() {
+    ffi_guard((), guard::clear_last_error);
+}
+
+/// Release a string returned by `aa_last_error`.
+///
+/// # Safety
+/// `s` must be null or a pointer returned by `aa_last_error` (freed once).
+#[no_mangle]
+pub unsafe extern "C" fn aa_free_error_string(s: *mut std::os::raw::c_char) {
+    ffi_guard((), || {
+        if !s.is_null() {
+            drop(std::ffi::CString::from_raw(s));
+        }
+    });
+}
+
+/// Panic isolation for the C ABI.
+///
+/// A panic that reaches an `extern "C"` boundary aborts the whole process
+/// (Rust 1.81+), taking the host (Unity, Unreal, a Python interpreter) down
+/// with it. Every exported function therefore runs its body through
+/// [`guard::ffi_guard`]: a panic is caught inside the function, its message is
+/// stored in a thread-local slot the host reads with `aa_last_error`, and
+/// the function returns the caller's sentinel (null handle, 0, -1, NaN, ()).
+/// Requires the crate to be built with `panic = "unwind"` (the default);
+/// `panic = "abort"` makes `catch_unwind` a no-op.
+pub(crate) mod guard {
+    use std::cell::RefCell;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    thread_local! {
+        static LAST_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
     }
-    drop(Box::from_raw(h));
+
+    /// Record an error message for `aa_last_error`.
+    pub fn set_last_error(msg: impl Into<String>) {
+        LAST_ERROR.with(|slot| *slot.borrow_mut() = Some(msg.into()));
+    }
+
+    /// Take the most recent error message (leaves the slot empty).
+    pub fn take_last_error() -> Option<String> {
+        LAST_ERROR.with(|slot| slot.borrow_mut().take())
+    }
+
+    /// Clear the most recent error message.
+    pub fn clear_last_error() {
+        LAST_ERROR.with(|slot| *slot.borrow_mut() = None);
+    }
+
+    /// Run `body`, converting a panic into `default` plus a recorded message.
+    ///
+    /// The closure is treated as unwind-safe: every FFI body only touches its
+    /// arguments and heap handles owned by the caller, so no partially-updated
+    /// shared state is observable afterwards.
+    #[inline]
+    pub fn ffi_guard<T>(default: T, body: impl FnOnce() -> T) -> T {
+        match catch_unwind(AssertUnwindSafe(body)) {
+            Ok(v) => v,
+            Err(payload) => {
+                let msg = payload
+                    .downcast_ref::<&str>()
+                    .map(|s| (*s).to_string())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "panic with non-string payload".to_string());
+                set_last_error(format!("aa FFI panic: {msg}"));
+                default
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn panic_becomes_default_and_message() {
+            clear_last_error();
+            let v = ffi_guard(-1i32, || -> i32 { panic!("boom {}", 42) });
+            assert_eq!(v, -1);
+            let msg = take_last_error().expect("message recorded");
+            assert!(msg.contains("boom 42"), "{msg}");
+            assert!(take_last_error().is_none(), "take clears the slot");
+        }
+
+        #[test]
+        fn success_leaves_slot_untouched() {
+            clear_last_error();
+            assert_eq!(ffi_guard(0, || 5), 5);
+            assert!(take_last_error().is_none());
+        }
+    }
+}
+
+use guard::ffi_guard;
+
+#[cfg(test)]
+mod guard_ffi_tests {
+    use super::*;
+
+    /// panic が sentinel + `aa_last_error` の message に変換され、host が文字列を
+    /// 取得 / 解放できること (extern "C" 3 本の end-to-end)
+    #[test]
+    fn last_error_roundtrip_through_c_abi() {
+        aa_clear_last_error();
+        assert!(aa_last_error().is_null(), "初期状態は null");
+        let v = ffi_guard(-1i32, || -> i32 { panic!("ffi test panic") });
+        assert_eq!(v, -1);
+        let s = aa_last_error();
+        assert!(!s.is_null());
+        let msg = unsafe { std::ffi::CStr::from_ptr(s) }
+            .to_string_lossy()
+            .into_owned();
+        assert!(msg.contains("ffi test panic"), "{msg}");
+        unsafe { aa_free_error_string(s) };
+        assert!(aa_last_error().is_null(), "take で slot は空になる");
+    }
+
+    /// 無効 handle は panic せず sentinel を返す、認可系は fail-closed
+    #[test]
+    fn null_handles_return_fail_closed_sentinels() {
+        unsafe {
+            assert_eq!(
+                aa_revlist_is_revoked(ptr::null(), ptr::null()),
+                0,
+                "null 入力は従来通り 0"
+            );
+        }
+        assert!(
+            aa_last_error().is_null(),
+            "sentinel 経路は error を記録しない"
+        );
+        // panic 経路の sentinel は fail-closed (1 = revoked)
+        let v = ffi_guard(1i32, || -> i32 { panic!("revlist panic") });
+        assert_eq!(v, 1);
+        aa_clear_last_error();
+    }
 }
