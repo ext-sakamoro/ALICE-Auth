@@ -524,15 +524,19 @@ Your identity `alice://did:ed25519:...` is mathematically yours. If a world bans
 
 ## License
 
-**GNU AGPLv3** (Affero General Public License v3.0)
+`AGPL-3.0-or-later OR LicenseRef-Commercial` — dual-licensed. Pick either.
 
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+| Option | Terms | Use it when |
+|--------|-------|-------------|
+| **AGPL-3.0-or-later** | [LICENSE-AGPL](LICENSE-AGPL) — free, no reporting obligation | Your project is itself AGPL-compatible open source, or you are only using it internally |
+| **Commercial License** | [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md) — paid, removes the copyleft | Closed-source product, proprietary SaaS, edge / firmware distribution, plugin redistribution, or a platform NDA that forbids source disclosure |
 
-**Why AGPL?** This license ensures that if any entity (e.g., cloud providers) runs ALICE-Auth as a service over a network, they must release their modifications to the source code. This protects the ALICE ecosystem from proprietary embrace-and-extend tactics.
+AGPL is a strong copyleft: a product, firmware image, or service that links
+`alice-auth` and is distributed or served to users must be released under the AGPL
+as well. That is intentional for the open ecosystem, and the Commercial
+License exists for the cases where it is not something you are able to do.
 
-Commercial licensing is available for enterprise use cases where source code disclosure is not possible.
-
-**For commercial inquiries, please contact: https://extoria.co.jp/en**
+Commercial licence enquiries: <contact@extoria.co.jp>
 
 ## Author
 
