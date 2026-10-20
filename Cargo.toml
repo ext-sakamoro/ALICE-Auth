@@ -23,7 +23,7 @@ std = ["alloc", "getrandom/std"]
 alloc = []
 serde = ["dep:serde"]
 ffi = ["std", "api"]  # src/ffi.rs が api_bridge::AuthToken を無条件使用 (2026-09-15 まで api 欠落で ffi 単独は compile 不能)
-pyo3 = ["dep:pyo3", "std"]  # Python bindings (no numpy needed)
+pyo3 = ["dep:pyo3", "std", "api", "nizk"]  # Python bindings (no numpy needed): src/python.rs binds the api_bridge / crypto_bridge / nizk items, so the wheel (pyproject.toml `features = ["pyo3"]`) enables them
 crypto = ["dep:alice-crypto", "std"]  # ALICE-Crypto token hashing + session encryption
 nizk = ["dep:curve25519-dalek", "crypto", "std"]  # Schnorr NIZK proof (true ZKP)
 db = ["std"]  # Auth audit log (self-contained BTreeMap store)
