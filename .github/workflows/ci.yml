@@ -13,7 +13,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # `ci/**` is a staging branch: a fix goes there first and its CI runs by
+    # SHA before main is fast-forwarded to the same commit
+    branches: [main, 'ci/**']
   pull_request:
     branches: [main]
 
