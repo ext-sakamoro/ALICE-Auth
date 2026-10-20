@@ -110,8 +110,13 @@ pub fn hello(i: &Identity) -> Hello {
     Hello { id: i.id(), v: 1 }
 }
 /// Sign a challenge nonce, producing a `Response`.
-#[inline(always)]
-#[must_use]
-pub fn respond(i: &Identity, c: &Challenge) -> Response {
-    Response { s: i.sign32(&c.n) }
+///
+/// # Errors
+///
+/// [`SignError::ReservedPrefix`] when the nonce starts with
+/// [`RESERVED_PREFIX`]: the nonce comes from the other side, and answering it
+/// would sign the start of one of the crate's own formats.
+#[inline]
+pub fn respond(i: &Identity, c: &Challenge) -> core::result::Result<Response, SignError> {
+    Ok(Response { s: i.sign32(&c.n)? })
 }

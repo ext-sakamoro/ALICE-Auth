@@ -25,24 +25,24 @@ fn gen() {
 #[test]
 fn sign_verify() {
     let i = Identity::gen().unwrap();
-    assert!(ok(&i.id(), b"x", &i.sign(b"x")));
+    assert!(ok(&i.id(), b"x", &i.sign(b"x").expect("sign")));
 }
 #[test]
 fn challenge_flow() {
     let i = Identity::gen().unwrap();
     let c = challenge().unwrap();
-    assert!(verify32(&i.id(), &c, &i.sign32(&c)).is_ok());
+    assert!(verify32(&i.id(), &c, &i.sign32(&c).expect("sign")).is_ok());
 }
 #[test]
 fn wrong_signer() {
     let a = Identity::gen().unwrap();
     let b = Identity::gen().unwrap();
-    assert!(!ok(&b.id(), b"x", &a.sign(b"x")));
+    assert!(!ok(&b.id(), b"x", &a.sign(b"x").expect("sign")));
 }
 #[test]
 fn tamper() {
     let i = Identity::gen().unwrap();
-    assert!(!ok(&i.id(), b"y", &i.sign(b"x")));
+    assert!(!ok(&i.id(), b"y", &i.sign(b"x").expect("sign")));
 }
 #[test]
 fn seed_recovery() {
@@ -55,7 +55,7 @@ fn full_flow() {
     let i = Identity::gen().unwrap();
     let h = hello(&i);
     let p = make_challenge(h.id).unwrap();
-    let r = respond(&i, &Challenge { n: p.c });
+    let r = respond(&i, &Challenge { n: p.c }).expect("sign");
     assert!(matches!(check(&p, &r), AuthResult::Ok(_)));
 }
 #[test]
@@ -136,7 +136,7 @@ fn verify32_invalid_sig_returns_err() {
 #[test]
 fn sign_empty_message() {
     let i = Identity::gen().unwrap();
-    let sig = i.sign(b"");
+    let sig = i.sign(b"").expect("sign");
     assert!(ok(&i.id(), b"", &sig));
 }
 
@@ -144,7 +144,7 @@ fn sign_empty_message() {
 fn sign_large_message() {
     let i = Identity::gen().unwrap();
     let msg = [0xAA; 256];
-    let sig = i.sign(&msg);
+    let sig = i.sign(&msg).expect("sign");
     assert!(ok(&i.id(), &msg, &sig));
 }
 
@@ -184,7 +184,7 @@ fn check_wrong_response_fails() {
     let i = Identity::gen().unwrap();
     let other = Identity::gen().unwrap();
     let p = make_challenge(i.id()).unwrap();
-    let r = respond(&other, &Challenge { n: p.c });
+    let r = respond(&other, &Challenge { n: p.c }).expect("sign");
     assert!(matches!(check(&p, &r), AuthResult::Fail));
 }
 
@@ -243,7 +243,7 @@ mod rotation_tests {
     #[test]
     fn rotating_identity_verify_any_current() {
         let ri = RotatingIdentity::gen().unwrap();
-        let sig = ri.sign(b"msg");
+        let sig = ri.sign(b"msg").expect("sign");
         assert!(ri.verify_any(&ri.id(), b"msg", &sig));
     }
 
@@ -251,7 +251,7 @@ mod rotation_tests {
     fn rotating_identity_verify_any_previous() {
         let mut ri = RotatingIdentity::gen().unwrap();
         let old_id = ri.id();
-        let sig = ri.sign(b"msg");
+        let sig = ri.sign(b"msg").expect("sign");
         ri.rotate(1000).unwrap();
         // Old signature still verifiable via verify_any
         assert!(ri.verify_any(&old_id, b"msg", &sig));
@@ -320,7 +320,7 @@ mod rotation_tests {
 fn timed_challenge_valid() {
     let i = Identity::gen().unwrap();
     let tp = make_timed_challenge(i.id(), 1000).unwrap();
-    let r = respond(&i, &Challenge { n: tp.c });
+    let r = respond(&i, &Challenge { n: tp.c }).expect("sign");
     assert!(matches!(
         check_timed(&tp, &r, 2000, CHALLENGE_TTL_MS),
         AuthResult::Ok(_)
@@ -331,7 +331,7 @@ fn timed_challenge_valid() {
 fn timed_challenge_expired() {
     let i = Identity::gen().unwrap();
     let tp = make_timed_challenge(i.id(), 1000).unwrap();
-    let r = respond(&i, &Challenge { n: tp.c });
+    let r = respond(&i, &Challenge { n: tp.c }).expect("sign");
     // 31 seconds later → expired (TTL = 30s)
     assert!(matches!(
         check_timed(&tp, &r, 32_000, CHALLENGE_TTL_MS),
@@ -343,7 +343,7 @@ fn timed_challenge_expired() {
 fn timed_challenge_at_boundary() {
     let i = Identity::gen().unwrap();
     let tp = make_timed_challenge(i.id(), 0).unwrap();
-    let r = respond(&i, &Challenge { n: tp.c });
+    let r = respond(&i, &Challenge { n: tp.c }).expect("sign");
     // Exactly at TTL boundary → still valid (not >)
     assert!(matches!(
         check_timed(&tp, &r, CHALLENGE_TTL_MS, CHALLENGE_TTL_MS),
@@ -361,7 +361,7 @@ fn timed_challenge_wrong_signer() {
     let i = Identity::gen().unwrap();
     let other = Identity::gen().unwrap();
     let tp = make_timed_challenge(i.id(), 1000).unwrap();
-    let r = respond(&other, &Challenge { n: tp.c });
+    let r = respond(&other, &Challenge { n: tp.c }).expect("sign");
     assert!(matches!(
         check_timed(&tp, &r, 1500, CHALLENGE_TTL_MS),
         AuthResult::Fail
@@ -490,8 +490,8 @@ mod timing_tests {
     fn verify_timing_consistency() {
         let i = Identity::gen().unwrap();
         let msg = [0xAA; 64];
-        let valid_sig = i.sign(&msg);
-        let invalid_sig = i.sign(&[0x55; 64]);
+        let valid_sig = i.sign(&msg).expect("sign");
+        let invalid_sig = i.sign(&[0x55; 64]).expect("sign");
         assert!(
             verify(&i.id(), &msg, &invalid_sig).is_err(),
             "the wrong arm must not verify"

@@ -194,7 +194,9 @@ pub fn create_jwt(identity: &Identity, claims: &JwtClaims) -> String {
     let payload_b64 = base64url_encode(claims.to_json().as_bytes());
 
     let signing_input = format!("{header_b64}.{payload_b64}");
-    let sig = identity.sign(signing_input.as_bytes());
+    // the crate's own format: the input starts with the base64url of the fixed
+    // header (base64url has no `/`, so it can never start with RESERVED_PREFIX)
+    let sig = identity.sign_reserved(signing_input.as_bytes());
 
     format!("{signing_input}.{}", base64url_encode(&sig.0))
 }

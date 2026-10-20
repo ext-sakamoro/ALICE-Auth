@@ -282,7 +282,7 @@ fn usable_key(key: &AliceId) -> bool {
 fn sign_tagged(signer: &Identity, tag: &[u8; 24], body: &[u8]) -> AliceSig {
     let mut m = [0u8; 24 + MAX_BODY_LEN];
     let n = tagged(&mut m, tag, body);
-    signer.sign(&m[..n])
+    signer.sign_reserved(&m[..n])
 }
 
 /// Check strictly that `sig` is `key`'s signature of `tag` followed by `body`.

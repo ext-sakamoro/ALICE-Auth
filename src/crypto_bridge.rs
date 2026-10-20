@@ -250,7 +250,7 @@ mod tests {
         let id = crate::Identity::gen().unwrap();
         let shards = split_seed(&id, 3, 2).unwrap();
         let recovered = recover_identity(&[shards[0].clone(), shards[1].clone()]).unwrap();
-        let sig = recovered.sign(b"test message");
+        let sig = recovered.sign(b"test message").expect("sign");
         assert!(crate::ok(&id.id(), b"test message", &sig));
     }
 
@@ -290,7 +290,7 @@ mod tests {
     fn test_derive_child_can_sign() {
         let parent = crate::Identity::gen().unwrap();
         let child = derive_child(&parent, 42);
-        let sig = child.sign(b"child signed");
+        let sig = child.sign(b"child signed").expect("sign");
         assert!(crate::ok(&child.id(), b"child signed", &sig));
         // Child signature should NOT verify against parent
         assert!(!crate::ok(&parent.id(), b"child signed", &sig));

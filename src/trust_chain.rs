@@ -65,7 +65,7 @@ pub fn endorse(
     Ok(Endorsement {
         endorser: signer.id(),
         endorsed: *target,
-        sig: signer.sign(&payload),
+        sig: signer.sign_reserved(&payload),
         issued_ms: now_ms,
         expires_ms,
     })

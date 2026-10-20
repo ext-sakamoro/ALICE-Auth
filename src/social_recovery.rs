@@ -63,7 +63,7 @@ pub fn approve_recovery(
         guardian: guardian.id(),
         old_id: *old_id,
         new_id: *new_id,
-        sig: guardian.sign(&payload),
+        sig: guardian.sign_reserved(&payload),
         approved_ms: now_ms,
     }
 }

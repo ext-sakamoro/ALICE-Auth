@@ -60,21 +60,41 @@ pub unsafe extern "C" fn aa_id(h: *const Handle, o: *mut u8) {
 }
 /// Sign a 32-byte challenge and write the 64-byte signature into `o`.
 ///
+/// Returns [`AA_SIGN_OK`], [`AA_SIGN_ERR_NULL`] for a null argument or
+/// [`AA_SIGN_ERR_RESERVED`] when the challenge starts with
+/// [`RESERVED_PREFIX`](crate::RESERVED_PREFIX). On an error `o` is not
+/// written and `aa_last_error` describes it.
+///
 /// # Safety
 ///
 /// - `h` must be a valid pointer returned by [`aa_new`], or null.
 /// - `c` must point to at least 32 readable bytes (challenge).
 /// - `o` must point to at least 64 writable bytes.
 #[no_mangle]
-pub unsafe extern "C" fn aa_sign(h: *const Handle, c: *const u8, o: *mut u8) {
-    ffi_guard((), || {
+pub unsafe extern "C" fn aa_sign(h: *const Handle, c: *const u8, o: *mut u8) -> i32 {
+    ffi_guard(AA_SIGN_ERR_NULL, || {
         if h.is_null() || c.is_null() || o.is_null() {
-            null_ptr();
-            return;
+            guard::set_last_error("aa_sign: null handle, challenge or output");
+            return AA_SIGN_ERR_NULL;
         }
-        w64(&(*h).0.sign32(&r32(c)).0, o);
-    });
+        match (*h).0.sign32(&r32(c)) {
+            Ok(s) => {
+                w64(&s.0, o);
+                AA_SIGN_OK
+            }
+            Err(e) => {
+                guard::set_last_error(format!("aa_sign: {e}"));
+                AA_SIGN_ERR_RESERVED
+            }
+        }
+    })
 }
+/// `aa_sign`: the signature was written.
+pub const AA_SIGN_OK: i32 = 0;
+/// `aa_sign`: a null argument (or the call panicked).
+pub const AA_SIGN_ERR_NULL: i32 = -1;
+/// `aa_sign`: the challenge starts with the reserved prefix `alice-auth/`.
+pub const AA_SIGN_ERR_RESERVED: i32 = -2;
 /// Verify an Ed25519 signature over a message.
 ///
 /// # Safety

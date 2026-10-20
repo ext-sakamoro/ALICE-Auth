@@ -25,7 +25,7 @@ namespace Alice.Auth
         // --- Core Identity ---
         [DllImport(Lib)] internal static extern IntPtr aa_new();
         [DllImport(Lib)] internal static extern void aa_id(IntPtr h, byte[] o);
-        [DllImport(Lib)] internal static extern void aa_sign(IntPtr h, byte[] c, byte[] o);
+        [DllImport(Lib)] internal static extern int aa_sign(IntPtr h, byte[] c, byte[] o);
         [DllImport(Lib)] internal static extern int aa_verify(byte[] pk, byte[] m, UIntPtr ml, byte[] s);
         [DllImport(Lib)] internal static extern void aa_free(IntPtr h);
 
@@ -111,7 +111,11 @@ namespace Alice.Auth
             if (challenge == null || challenge.Length != 32)
                 throw new ArgumentException("challenge must be 32 bytes");
             var o = new byte[64];
-            Native.aa_sign(handle, challenge, o);
+            int rc = Native.aa_sign(handle, challenge, o);
+            if (rc == -2)
+                throw new ArgumentException("challenge starts with the reserved prefix alice-auth/", nameof(challenge));
+            if (rc != 0)
+                throw new InvalidOperationException("ALICE-Auth: sign failed");
             return o;
         }
 

@@ -19,14 +19,14 @@ fuzz_target!(|data: &[u8]| {
     // Correct flow: alice proves her identity
     let h = hello(&alice);
     if let Ok(pending) = make_challenge(h.id) {
-        let resp = respond(&alice, &Challenge { n: pending.c });
+        let resp = respond(&alice, &Challenge { n: pending.c }).expect("sign");
         assert!(
             matches!(check(&pending, &resp), AuthResult::Ok(_)),
             "correct signer must pass"
         );
 
         // Wrong signer: bob tries to impersonate alice
-        let bad_resp = respond(&bob, &Challenge { n: pending.c });
+        let bad_resp = respond(&bob, &Challenge { n: pending.c }).expect("sign");
         // Only fail if seeds are actually different (same seed = same identity)
         if seed_a != seed_b {
             assert!(

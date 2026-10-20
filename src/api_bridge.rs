@@ -785,7 +785,7 @@ mod tests {
     fn test_verify_valid_request() {
         let i = crate::Identity::gen().unwrap();
         let token = AuthMiddleware::create_auth_token(1000, 60_000).unwrap();
-        let sig = i.sign(&token);
+        let sig = i.sign(&token).expect("sign");
         let req = AuthRequest {
             token,
             signature: sig,
@@ -823,7 +823,7 @@ mod tests {
     fn test_verify_short_token() {
         let i = crate::Identity::gen().unwrap();
         let short_token = vec![1, 2, 3];
-        let sig = i.sign(&short_token);
+        let sig = i.sign(&short_token).expect("sign");
         let req = AuthRequest {
             token: short_token,
             signature: sig,
@@ -843,7 +843,7 @@ mod tests {
     fn test_verify_expired_token() {
         let i = crate::Identity::gen().unwrap();
         let token = AuthMiddleware::create_auth_token(1000, 5000).unwrap(); // expires at 6000
-        let sig = i.sign(&token);
+        let sig = i.sign(&token).expect("sign");
         let req = AuthRequest {
             token,
             signature: sig,
@@ -979,7 +979,7 @@ mod tests {
     fn test_revocation_in_middleware() {
         let i = crate::Identity::gen().unwrap();
         let token = AuthMiddleware::create_auth_token(1000, 60_000).unwrap();
-        let sig = i.sign(&token);
+        let sig = i.sign(&token).expect("sign");
 
         let mut tok16 = [0u8; 16];
         tok16.copy_from_slice(&token[..16]);

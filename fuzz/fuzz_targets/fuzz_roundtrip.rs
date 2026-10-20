@@ -13,7 +13,7 @@ fuzz_target!(|data: &[u8]| {
     let msg = &data[32..];
 
     let id = Identity::from_seed(&seed);
-    let sig = id.sign(msg);
+    let sig = id.sign(msg).expect("sign");
 
     // Roundtrip must always succeed
     assert!(ok(&id.id(), msg, &sig), "roundtrip verify failed");
