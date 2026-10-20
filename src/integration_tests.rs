@@ -477,11 +477,25 @@ mod timing_tests {
     use super::super::*;
 
     #[test]
+    /// Verification of a well-formed signature takes the full check whether it
+    /// matches or not: the wrong arm is a valid signature of another message under
+    /// the same key, so an exit that depends on the signature's content (a byte
+    /// compare, a cache of accepted signatures) shows up as a ratio.
+    ///
+    /// A structurally invalid signature (a small-order R, a non-canonical S, the
+    /// all-zero bytes) may be refused before the full check: the key, the message
+    /// and the signature are all public, so an early refusal reveals nothing.
+    /// Those inputs are covered by tests/verify_strict.rs and get no timing bound
+    /// here. Secret comparisons are the ct_eq tests below.
     fn verify_timing_consistency() {
         let i = Identity::gen().unwrap();
         let msg = [0xAA; 64];
         let valid_sig = i.sign(&msg);
-        let invalid_sig = AliceSig::new([0u8; 64]);
+        let invalid_sig = i.sign(&[0x55; 64]);
+        assert!(
+            verify(&i.id(), &msg, &invalid_sig).is_err(),
+            "the wrong arm must not verify"
+        );
 
         // Run multiple rounds to check variance is bounded
         let rounds = 100;

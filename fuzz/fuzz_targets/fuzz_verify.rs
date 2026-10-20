@@ -21,4 +21,14 @@ fuzz_target!(|data: &[u8]| {
     // Must not panic — failure returns Err/false
     let _ = verify(&id, msg, &s);
     let _ = ok(&id, msg, &s);
+
+    // The small-order key (the identity point) with R = B, S = 1 verifies for
+    // every message under a plain check; the strict check refuses it for this one
+    let mut small = [0u8; 32];
+    small[0] = 1;
+    let mut any = [0x66u8; 64];
+    any[0] = 0x58;
+    any[32..].fill(0);
+    any[32] = 1;
+    assert!(!ok(&AliceId::new(small), msg, &AliceSig::new(any)), "small-order key accepted");
 });
