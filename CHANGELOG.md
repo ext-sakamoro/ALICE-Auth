@@ -7,6 +7,7 @@ All notable changes to ALICE-Auth will be documented in this file.
 ### Changed
 - **License: `AGPL-3.0-or-later` → `AGPL-3.0-or-later OR LicenseRef-Commercial` (dual-licensed、2026-09-27)** AGPL 側の条件は変更なし (既存 AGPL 利用者への影響ゼロ)、商用という選択肢が追加されただけ SPDX が AGPL 単独だと cargo-deny / FOSSA / SBOM に「商用オプションなし」と見えるため宣言を dual に 変更点: SPDX / `LICENSE` → `LICENSE-AGPL` / `LICENSE-COMMERCIAL.md` (商用トリガー 6 条件 = クローズド製品・商用 SaaS・エッジ / ファームウェア配布・plugin 再配布・プラットフォーム NDA・保証、社内利用は AGPL 側で無償と明記) / README の選択肢表 商用窓口は法人 `contact@extoria.co.jp`
 - 依存: optional の `alice-crypto` (feature `crypto` / `nizk`) の要求を `0.1` から `0.4` に上げた 以前の要求は公開中の 0.4.1 を受け取れなかった 0.4.1 で `crypto` / `nizk` / `pyo3` を build し、`crypto` / `nizk` を含む feature で試験が通ることを確かめた
+- CI: `ci/**` の branch への push でも `ci.yml` を走らせる (main を進める前に同じ commit で CI の結果を得る)
 
 ### Fixed
 - **FFI 28 関数の panic 隔離** (`ffi.rs` / `ffi_nizk.rs` / `ffi_crypto.rs`): 全 `extern "C"` の本体を `ffi_guard(sentinel, || ..)` で包み、panic は host を落とさず sentinel + `aa_last_error()` (新規、`aa_clear_last_error` / `aa_free_error_string` も) で通知 認可系 (`aa_verify*` / `aa_policy_check` = 0、`aa_token_is_expired` = 1、`aa_revlist_is_revoked` = **1 = revoked**) は panic 時 fail-closed `[profile.release] panic = "abort"` を撤去 (abort では `catch_unwind` が機能しない) release profile で guard test 通過
