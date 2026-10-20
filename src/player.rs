@@ -507,6 +507,18 @@ impl Revocation {
 /// The revocations a verifier knows, with a fixed capacity. A full set refuses a new
 /// revocation and keeps every one it holds; entries leave only by [`RevocationSet::purge`],
 /// once the revoked grant has expired.
+///
+/// A refused revocation is not in effect: when [`RevocationSet::add`] returns
+/// [`GrantError::Full`], the grant it names stays valid until the caller acts. The caller
+/// must treat `Full` as an emergency, not as a retry: make a larger set (moving the
+/// entries over), or stop accepting grants from that game until the revocation is held.
+/// [`RevocationSet::len`] and [`RevocationSet::capacity`] show how close the set is.
+///
+/// An entry is one game and one nonce. A game that reuses a nonce makes one entry stand
+/// for every grant with that nonce: the entry keeps the latest grant expiry it was given,
+/// so it lasts until the last of those grants has expired (reuse lengthens the hold, it
+/// never shortens it). Unique nonces are the issuing game's duty (16 random bytes per
+/// grant).
 #[cfg(feature = "alloc")]
 #[derive(Clone, Debug)]
 pub struct RevocationSet {
@@ -530,8 +542,9 @@ impl RevocationSet {
         })
     }
 
-    /// Add a revocation after checking its signature under its game's key. Adding one the
-    /// set already holds succeeds and keeps the first.
+    /// Add a revocation after checking its signature under its game's key. Adding one for a
+    /// game and nonce the set already holds succeeds and keeps the later of the two grant
+    /// expiries (it takes no new room, even in a full set).
     ///
     /// # Errors
     /// [`GrantError::Signature`] when the signature does not verify, [`GrantError::Full`]
@@ -541,7 +554,8 @@ impl RevocationSet {
             return Err(GrantError::Signature);
         }
         let entry = (rev.game.0, rev.nonce);
-        if self.entries.contains_key(&entry) {
+        if let Some(expires_ms) = self.entries.get_mut(&entry) {
+            *expires_ms = (*expires_ms).max(rev.grant_expires_ms);
             return Ok(());
         }
         if self.entries.len() >= self.capacity {

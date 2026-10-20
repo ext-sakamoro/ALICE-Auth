@@ -319,6 +319,35 @@ fn the_signature_is_checked_before_the_fields() {
             "at {now}"
         );
     }
+    // every other check that could refuse it comes after the signature too
+    let other_game = Identity::from_seed(&[8; 32]).id();
+    assert_eq!(
+        g.verify(&other_game, &head(), 2000, &empty()),
+        Err(GrantError::Signature),
+        "with another expected game"
+    );
+    let other_key = ChainHead {
+        key: Identity::from_seed(&[3; 32]).id(),
+        ..head()
+    };
+    let other_player = ChainHead {
+        player: PlayerId::from_genesis(&key(K2)),
+        ..head()
+    };
+    for (name, h) in [("another key", other_key), ("another player", other_player)] {
+        assert_eq!(
+            g.verify(&key(GAME), &h, 2000, &empty()),
+            Err(GrantError::Signature),
+            "with {name}"
+        );
+    }
+    let mut revoked = empty();
+    revoked.add(&revocation0()).expect("add");
+    assert_eq!(
+        g.verify(&key(GAME), &head(), 2000, &revoked),
+        Err(GrantError::Signature),
+        "with its revocation in the set"
+    );
 }
 
 /// The grant's signature covers the grant tag; signatures made in the other domains of the
@@ -456,6 +485,55 @@ fn a_full_set_refuses_and_keeps_what_it_holds() {
     let again = Revocation::issue(&g, &grants[0], 3500).expect("r");
     assert_eq!(set.add(&again), Ok(()));
     assert_eq!(set.len(), 2);
+}
+
+/// A game that reuses a nonce makes one revocation entry stand for two grants. The entry
+/// keeps the later grant expiry, so purging at the earlier one does not bring the later
+/// grant back; a revocation that carries an earlier expiry does not shorten the entry.
+#[test]
+fn a_reused_nonce_keeps_the_later_expiry() {
+    let g = game();
+    let first = grant0(); // nonce NONCE, expires 5000
+    let later = Grant::issue(&g, player(), key(K2), SCOPE, 1500, 7500, NONCE).expect("issue");
+    assert_eq!(later.expires_ms, 9000);
+    let mut set = empty();
+    assert_eq!(set.add(&revocation0()), Ok(()));
+    assert_eq!(
+        set.add(&Revocation::issue(&g, &later, 3000).expect("r")),
+        Ok(())
+    );
+    assert_eq!(set.len(), 1);
+    assert_eq!(
+        set.purge(5000),
+        0,
+        "the entry lasts until the later grant expires"
+    );
+    assert_eq!(
+        later.verify(&key(GAME), &head(), 6000, &set),
+        Err(GrantError::Revoked)
+    );
+    assert_eq!(set.purge(8999), 0);
+    assert_eq!(set.purge(9000), 1);
+    // the other order: the later expiry first, then a revocation that carries the earlier
+    let mut set = empty();
+    assert_eq!(
+        set.add(&Revocation::issue(&g, &later, 3000).expect("r")),
+        Ok(())
+    );
+    assert_eq!(set.add(&revocation0()), Ok(()));
+    assert_eq!(
+        set.purge(5000),
+        0,
+        "an earlier expiry does not shorten the entry"
+    );
+    assert_eq!(
+        later.verify(&key(GAME), &head(), 6000, &set),
+        Err(GrantError::Revoked)
+    );
+    assert_eq!(
+        first.verify(&key(GAME), &head(), 4000, &set),
+        Err(GrantError::Revoked)
+    );
 }
 
 #[test]
