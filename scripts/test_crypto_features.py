@@ -7,8 +7,11 @@ the build. The script still fetches ALICE-Crypto at this repository's pin (netwo
 
 - a log with no `nizk::` test, or no `crypto_bridge::` test, or no passed test at all,
   exits 1 naming what is missing;
-- a good log exits 0, and cargo was asked for `test --locked` with every feature and for
-  the `pyo3` check with `--locked`;
+- a good log exits 0, and cargo was asked for `test --locked` with every feature, then for
+  `check --locked` of `crypto`, `nizk` and `pyo3` each on its own (a feature that does not
+  enable what its code uses fails there), and of the wheel's feature set when it differs;
+- a failing check of one feature fails the script;
+- no `[tool.maturin] features` in pyproject.toml exits 2 before anything is built;
 - a failing `cargo test` fails the script even when the log still has enough passed tests,
   and the `pyo3` check is not run;
 - a malformed pin exits 2 before anything is fetched.
@@ -30,6 +33,7 @@ SCRIPT = ROOT / "scripts" / "crypto_features.sh"
 FAKE_CARGO = """#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_CARGO_ARGV"
 if [[ "$1" == "test" ]]; then cat "$FAKE_CARGO_LOG"; exit "${FAKE_CARGO_RC:-0}"; fi
+if [[ "$1" == "check" && "${@: -1}" == "${FAKE_CHECK_FAIL:-}" ]]; then exit 101; fi
 exit 0
 """
 
@@ -56,6 +60,7 @@ class CryptoFeatures(unittest.TestCase):
         (self.r / ".github").mkdir()
         shutil.copy(SCRIPT, self.r / "scripts" / "crypto_features.sh")
         shutil.copy(ROOT / ".github" / "alice-crypto-pin", self.r / ".github" / "alice-crypto-pin")
+        self.write_wheel_features('["pyo3"]')
         git("init", "-q", "-b", "main", cwd=self.r)
         bin_dir = self.tmp / "bin"
         bin_dir.mkdir()
@@ -69,10 +74,16 @@ class CryptoFeatures(unittest.TestCase):
         self.env["FAKE_CARGO_LOG"] = str(self.log)
         self.env["CARGO_TARGET_DIR"] = str(self.tmp / "target")
 
+    def write_wheel_features(self, features: str | None) -> None:
+        body = '[build-system]\nrequires = ["maturin>=1.0,<2.0"]\n'
+        if features is not None:
+            body += f"\n[tool.maturin]\nfeatures = {features}\n"
+        (self.r / "pyproject.toml").write_text(body)
+
     def run_script(self, log: str) -> subprocess.CompletedProcess:
         self.log.write_text(log)
         git("add", "-A", cwd=self.r)
-        git("commit", "-qm", "c", cwd=self.r)
+        git("commit", "-q", "--allow-empty", "-m", "c", cwd=self.r)
         return subprocess.run(["bash", "scripts/crypto_features.sh"], cwd=self.r, capture_output=True, text=True,
                               env=self.env, timeout=300)
 
@@ -100,8 +111,40 @@ class CryptoFeatures(unittest.TestCase):
         self.assertIn("3 passed (1 nizk::, 1 crypto_bridge::)", p.stdout)
         self.assertEqual(self.calls(), [
             "test --locked --features std,api,ffi,crypto,nizk",
-            "check --locked --lib --features pyo3,api,nizk",
+            "check --locked --lib --features crypto",
+            "check --locked --lib --features nizk",
+            "check --locked --lib --features pyo3",
         ])
+        self.assertIn("checked 3 feature set(s)", p.stdout)
+
+    def test_a_wheel_feature_set_of_its_own_is_checked_too(self) -> None:
+        self.write_wheel_features('["pyo3", "serde"]')
+        p = self.run_script(NIZK + BRIDGE + OTHER + result(3))
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertEqual(self.calls()[1:], [
+            "check --locked --lib --features crypto",
+            "check --locked --lib --features nizk",
+            "check --locked --lib --features pyo3",
+            "check --locked --lib --features pyo3,serde",
+        ])
+
+    def test_a_feature_that_fails_alone_fails_the_script(self) -> None:
+        for feature in ("crypto", "nizk", "pyo3"):
+            with self.subTest(feature=feature):
+                self.env["FAKE_CHECK_FAIL"] = feature
+                p = self.run_script(NIZK + BRIDGE + OTHER + result(3))
+                self.assertNotEqual(p.returncode, 0, p.stdout + p.stderr)
+                self.assertNotIn("checked 3", p.stdout)
+                self.argv.unlink()
+
+    def test_no_wheel_feature_set_exits_2_before_building(self) -> None:
+        for features in (None, "[]"):
+            with self.subTest(features=features):
+                self.write_wheel_features(features)
+                p = self.run_script(NIZK + BRIDGE + OTHER + result(3))
+                self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+                self.assertIn("needs [tool.maturin] features", p.stderr)
+                self.assertEqual(self.calls(), [])
 
     def test_a_failing_cargo_test_fails_the_script(self) -> None:
         self.env["FAKE_CARGO_RC"] = "101"
