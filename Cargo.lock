@@ -28,11 +28,13 @@ dependencies = [
 
 [[package]]
 name = "alice-crypto"
-version = "0.1.0"
+version = "0.4.1"
 dependencies = [
  "blake3",
+ "chacha20",
  "chacha20poly1305",
  "getrandom",
+ "zeroize",
 ]
 
 [[package]]
