@@ -609,6 +609,181 @@ fn derive_child(parent: &PyIdentity, index: u32) -> PyIdentity {
 }
 
 // ============================================================================
+// Player: id, key chain, grants, revocations
+// ============================================================================
+
+pyo3::create_exception!(
+    alice_auth,
+    GrantError,
+    pyo3::exceptions::PyValueError,
+    "A player value was refused; args are (code, reason), the code being GrantError::code."
+);
+
+fn grant_err(e: crate::GrantError) -> PyErr {
+    GrantError::new_err((e.code(), e.to_string()))
+}
+
+fn arr<const N: usize>(b: &[u8], name: &str) -> PyResult<[u8; N]> {
+    b.try_into()
+        .map_err(|_| PyValueError::new_err(format!("{name} must be {N} bytes")))
+}
+
+/// The 32-byte player id of the first key `genesis`.
+#[pyfunction]
+fn player_id_from_genesis(genesis: &[u8]) -> PyResult<Vec<u8>> {
+    let g = AliceId(arr(genesis, "genesis")?);
+    Ok(crate::PlayerId::from_genesis(&g).0.to_vec())
+}
+
+/// A rotation link (173 bytes) from `old`'s key to `new_key` at `issued_ms`.
+#[pyfunction]
+fn rotation_link_issue(
+    old: &PyIdentity,
+    player: &[u8],
+    seq: u32,
+    new_key: &[u8],
+    issued_ms: u64,
+) -> PyResult<Vec<u8>> {
+    let link = crate::RotationLink::issue(
+        &old.inner,
+        crate::PlayerId(arr(player, "player")?),
+        seq,
+        AliceId(arr(new_key, "new_key")?),
+        issued_ms,
+    )
+    .map_err(grant_err)?;
+    Ok(link.to_bytes().to_vec())
+}
+
+/// Check rotation links (each 173 bytes) from the first key `genesis`; returns
+/// `(player, current_key, since_ms)` or raises GrantError.
+#[pyfunction]
+fn player_chain_resolve(genesis: &[u8], links: Vec<Vec<u8>>) -> PyResult<(Vec<u8>, Vec<u8>, u64)> {
+    let parsed = links
+        .iter()
+        .map(|l| crate::RotationLink::from_bytes(l))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(grant_err)?;
+    let h = crate::resolve_chain(&AliceId(arr(genesis, "genesis")?), &parsed).map_err(grant_err)?;
+    Ok((h.player.0.to_vec(), h.key.0.to_vec(), h.since_ms))
+}
+
+/// A grant (201 bytes) from `game` to `player` under `player_key`, valid
+/// `now_ms <= t < now_ms + ttl_ms`.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn grant_issue(
+    game: &PyIdentity,
+    player: &[u8],
+    player_key: &[u8],
+    scope: u64,
+    now_ms: u64,
+    ttl_ms: u64,
+    nonce: &[u8],
+) -> PyResult<Vec<u8>> {
+    let g = crate::Grant::issue(
+        &game.inner,
+        crate::PlayerId(arr(player, "player")?),
+        AliceId(arr(player_key, "player_key")?),
+        scope,
+        now_ms,
+        ttl_ms,
+        arr(nonce, "nonce")?,
+    )
+    .map_err(grant_err)?;
+    Ok(g.to_bytes().to_vec())
+}
+
+/// Check a grant for `expected_game` at `now_ms` against the chain end and `revoked`;
+/// returns `(player, scope, expires_ms)` or raises GrantError (the expiry itself is outside
+/// the window).
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn grant_verify(
+    grant: &[u8],
+    expected_game: &[u8],
+    head_player: &[u8],
+    head_key: &[u8],
+    head_since_ms: u64,
+    now_ms: u64,
+    revoked: &PyRevocationSet,
+) -> PyResult<(Vec<u8>, u64, u64)> {
+    let head = crate::ChainHead {
+        player: crate::PlayerId(arr(head_player, "head_player")?),
+        key: AliceId(arr(head_key, "head_key")?),
+        since_ms: head_since_ms,
+    };
+    let expected = AliceId(arr(expected_game, "expected_game")?);
+    let v = crate::Grant::from_bytes(grant)
+        .and_then(|g| g.verify(&expected, &head, now_ms, &revoked.inner))
+        .map_err(grant_err)?;
+    Ok((v.player.0.to_vec(), v.scope, v.expires_ms))
+}
+
+/// The revocation (129 bytes) of `grant` by `game`, the game that issued it.
+#[pyfunction]
+fn revocation_issue(game: &PyIdentity, grant: &[u8], revoked_ms: u64) -> PyResult<Vec<u8>> {
+    let r = crate::Grant::from_bytes(grant)
+        .and_then(|g| crate::Revocation::issue(&game.inner, &g, revoked_ms))
+        .map_err(grant_err)?;
+    Ok(r.to_bytes().to_vec())
+}
+
+/// The revocations a verifier knows, with a fixed capacity.
+#[pyclass(name = "RevocationSet")]
+pub struct PyRevocationSet {
+    inner: crate::RevocationSet,
+}
+
+#[pymethods]
+impl PyRevocationSet {
+    /// A set holding at most `capacity` revocations (at least 1).
+    #[new]
+    fn new(capacity: usize) -> PyResult<Self> {
+        Ok(Self {
+            inner: crate::RevocationSet::new(capacity).map_err(grant_err)?,
+        })
+    }
+
+    /// Add a revocation (129 bytes) after checking its signature. Raises GrantError when it
+    /// is not held. Full (-12) means it was NOT stored and the grant is still accepted:
+    /// treat it as an emergency (a larger set, or stop accepting that game's grants).
+    fn add(&mut self, revocation: &[u8]) -> PyResult<()> {
+        let r = crate::Revocation::from_bytes(revocation).map_err(grant_err)?;
+        self.inner.add(&r).map_err(grant_err)
+    }
+
+    /// Whether the grant `nonce` (16 bytes) of `game` (32 bytes) is revoked.
+    fn contains(&self, game: &[u8], nonce: &[u8]) -> PyResult<bool> {
+        Ok(self
+            .inner
+            .contains(&AliceId(arr(game, "game")?), &arr(nonce, "nonce")?))
+    }
+
+    /// Drop the revocations of grants expired at `now_ms`; returns how many.
+    fn purge(&mut self, now_ms: u64) -> usize {
+        self.inner.purge(now_ms)
+    }
+
+    #[getter]
+    fn capacity(&self) -> usize {
+        self.inner.capacity()
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "RevocationSet(len={}, capacity={})",
+            self.inner.len(),
+            self.inner.capacity()
+        )
+    }
+}
+
+// ============================================================================
 // Module
 // ============================================================================
 
@@ -645,6 +820,16 @@ pub fn alice_auth(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // HD鍵導出
     m.add_function(wrap_pyfunction!(derive_child, m)?)?;
+
+    // player (id、鍵の鎖、grant、取消)
+    m.add_class::<PyRevocationSet>()?;
+    m.add("GrantError", m.py().get_type::<GrantError>())?;
+    m.add_function(wrap_pyfunction!(player_id_from_genesis, m)?)?;
+    m.add_function(wrap_pyfunction!(rotation_link_issue, m)?)?;
+    m.add_function(wrap_pyfunction!(player_chain_resolve, m)?)?;
+    m.add_function(wrap_pyfunction!(grant_issue, m)?)?;
+    m.add_function(wrap_pyfunction!(grant_verify, m)?)?;
+    m.add_function(wrap_pyfunction!(revocation_issue, m)?)?;
 
     Ok(())
 }

@@ -1,15 +1,17 @@
 //! FFI for the player module (player id, key chain, grants, revocations).
 //!
 //! Every function returns `AA_PLAYER_OK` (0) or the negative code of
-//! [`GrantError::code`](crate::GrantError::code), sets `aa_last_error` on a refusal, and
-//! writes its outputs only on success. A null argument is [`GrantError::Null`](crate::GrantError::Null).
+//! [`GrantError::code`], sets `aa_last_error` on a refusal, and writes its outputs only on
+//! success. A null argument is [`GrantError::Null`].
 //! Wire forms are passed as byte buffers of the lengths below.
-
-#![allow(clippy::missing_safety_doc)]
 
 use super::ffi::{guard, Handle};
 use crate::player::*;
+use crate::types::AliceId;
 use std::boxed::Box;
+use std::format;
+use std::vec::Vec;
+use zeroize::Zeroize;
 
 /// Success.
 pub const AA_PLAYER_OK: i32 = 0;
@@ -35,8 +37,17 @@ pub struct RevSetHandle(RevocationSet);
 /// # Safety
 /// `seed` must point to 32 readable bytes, or be null.
 #[no_mangle]
-pub unsafe extern "C" fn aa_from_seed(_seed: *const u8) -> *mut Handle {
-    guard::ffi_guard(core::ptr::null_mut(), || todo!("aa_from_seed"))
+pub unsafe extern "C" fn aa_from_seed(seed: *const u8) -> *mut Handle {
+    guard::ffi_guard(core::ptr::null_mut(), || {
+        if seed.is_null() {
+            guard::set_last_error("aa_from_seed: null seed");
+            return core::ptr::null_mut();
+        }
+        let mut s = rd::<32>(seed);
+        let h = Box::into_raw(Box::new(Handle(crate::Identity::from_seed(&s))));
+        s.zeroize();
+        h
+    })
 }
 
 /// Write the player id of the first key `genesis` (32 bytes) into `out` (32 bytes).
@@ -44,9 +55,15 @@ pub unsafe extern "C" fn aa_from_seed(_seed: *const u8) -> *mut Handle {
 /// # Safety
 /// `genesis` must point to 32 readable bytes and `out` to 32 writable bytes.
 #[no_mangle]
-pub unsafe extern "C" fn aa_player_id_from_genesis(_genesis: *const u8, _out: *mut u8) -> i32 {
+pub unsafe extern "C" fn aa_player_id_from_genesis(genesis: *const u8, out: *mut u8) -> i32 {
     guard::ffi_guard(GrantError::Null.code(), || {
-        todo!("aa_player_id_from_genesis")
+        const F: &str = "aa_player_id_from_genesis";
+        if genesis.is_null() || out.is_null() {
+            return fail(F, GrantError::Null);
+        }
+        let id = PlayerId::from_genesis(&AliceId(rd(genesis)));
+        wr(&id.0, out);
+        AA_PLAYER_OK
     })
 }
 
@@ -58,14 +75,32 @@ pub unsafe extern "C" fn aa_player_id_from_genesis(_genesis: *const u8, _out: *m
 /// `out` to `AA_ROTATION_LINK_LEN` writable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn aa_rotation_link_issue(
-    _old: *const Handle,
-    _player: *const u8,
-    _seq: u32,
-    _new_key: *const u8,
-    _issued_ms: u64,
-    _out: *mut u8,
+    old: *const Handle,
+    player: *const u8,
+    seq: u32,
+    new_key: *const u8,
+    issued_ms: u64,
+    out: *mut u8,
 ) -> i32 {
-    guard::ffi_guard(GrantError::Null.code(), || todo!("aa_rotation_link_issue"))
+    guard::ffi_guard(GrantError::Null.code(), || {
+        const F: &str = "aa_rotation_link_issue";
+        if old.is_null() || player.is_null() || new_key.is_null() || out.is_null() {
+            return fail(F, GrantError::Null);
+        }
+        match RotationLink::issue(
+            &(*old).0,
+            PlayerId(rd(player)),
+            seq,
+            AliceId(rd(new_key)),
+            issued_ms,
+        ) {
+            Ok(l) => {
+                wr(&l.to_bytes(), out);
+                AA_PLAYER_OK
+            }
+            Err(e) => fail(F, e),
+        }
+    })
 }
 
 /// Check `n_links` rotation links (contiguous, `AA_ROTATION_LINK_LEN` bytes each) from the
@@ -78,14 +113,47 @@ pub unsafe extern "C" fn aa_rotation_link_issue(
 /// writable bytes; `out_since_ms` to a writable `u64`.
 #[no_mangle]
 pub unsafe extern "C" fn aa_player_chain_resolve(
-    _genesis: *const u8,
-    _links: *const u8,
-    _n_links: usize,
-    _out_player: *mut u8,
-    _out_key: *mut u8,
-    _out_since_ms: *mut u64,
+    genesis: *const u8,
+    links: *const u8,
+    n_links: usize,
+    out_player: *mut u8,
+    out_key: *mut u8,
+    out_since_ms: *mut u64,
 ) -> i32 {
-    guard::ffi_guard(GrantError::Null.code(), || todo!("aa_player_chain_resolve"))
+    guard::ffi_guard(GrantError::Null.code(), || {
+        const F: &str = "aa_player_chain_resolve";
+        if genesis.is_null()
+            || (links.is_null() && n_links != 0)
+            || out_player.is_null()
+            || out_key.is_null()
+            || out_since_ms.is_null()
+        {
+            return fail(F, GrantError::Null);
+        }
+        let Some(total) = n_links.checked_mul(ROTATION_LINK_LEN) else {
+            return fail(F, GrantError::Length);
+        };
+        let raw: &[u8] = if n_links == 0 {
+            &[]
+        } else {
+            core::slice::from_raw_parts(links, total)
+        };
+        let parsed: Result<Vec<RotationLink>, GrantError> = raw
+            .as_chunks::<ROTATION_LINK_LEN>()
+            .0
+            .iter()
+            .map(|c| RotationLink::from_bytes(c))
+            .collect();
+        match parsed.and_then(|l| resolve_chain(&AliceId(rd(genesis)), &l)) {
+            Ok(h) => {
+                wr(&h.player.0, out_player);
+                wr(&h.key.0, out_key);
+                *out_since_ms = h.since_ms;
+                AA_PLAYER_OK
+            }
+            Err(e) => fail(F, e),
+        }
+    })
 }
 
 /// Sign a grant from `game` and write it into `out` (`AA_GRANT_LEN` bytes).
@@ -95,16 +163,41 @@ pub unsafe extern "C" fn aa_player_chain_resolve(
 /// bytes, `nonce` to 16; `out` to `AA_GRANT_LEN` writable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn aa_grant_issue(
-    _game: *const Handle,
-    _player: *const u8,
-    _player_key: *const u8,
-    _scope: u64,
-    _now_ms: u64,
-    _ttl_ms: u64,
-    _nonce: *const u8,
-    _out: *mut u8,
+    game: *const Handle,
+    player: *const u8,
+    player_key: *const u8,
+    scope: u64,
+    now_ms: u64,
+    ttl_ms: u64,
+    nonce: *const u8,
+    out: *mut u8,
 ) -> i32 {
-    guard::ffi_guard(GrantError::Null.code(), || todo!("aa_grant_issue"))
+    guard::ffi_guard(GrantError::Null.code(), || {
+        const F: &str = "aa_grant_issue";
+        if game.is_null()
+            || player.is_null()
+            || player_key.is_null()
+            || nonce.is_null()
+            || out.is_null()
+        {
+            return fail(F, GrantError::Null);
+        }
+        match Grant::issue(
+            &(*game).0,
+            PlayerId(rd(player)),
+            AliceId(rd(player_key)),
+            scope,
+            now_ms,
+            ttl_ms,
+            rd(nonce),
+        ) {
+            Ok(g) => {
+                wr(&g.to_bytes(), out);
+                AA_PLAYER_OK
+            }
+            Err(e) => fail(F, e),
+        }
+    })
 }
 
 /// Check a grant (`grant_len` bytes) for `expected_game` at `now_ms`, against the chain end
@@ -117,19 +210,48 @@ pub unsafe extern "C" fn aa_grant_issue(
 /// `out_scope` and `out_expires_ms` to writable `u64`s.
 #[no_mangle]
 pub unsafe extern "C" fn aa_grant_verify(
-    _grant: *const u8,
-    _grant_len: usize,
-    _expected_game: *const u8,
-    _head_player: *const u8,
-    _head_key: *const u8,
-    _head_since_ms: u64,
-    _now_ms: u64,
-    _revoked: *const RevSetHandle,
-    _out_player: *mut u8,
-    _out_scope: *mut u64,
-    _out_expires_ms: *mut u64,
+    grant: *const u8,
+    grant_len: usize,
+    expected_game: *const u8,
+    head_player: *const u8,
+    head_key: *const u8,
+    head_since_ms: u64,
+    now_ms: u64,
+    revoked: *const RevSetHandle,
+    out_player: *mut u8,
+    out_scope: *mut u64,
+    out_expires_ms: *mut u64,
 ) -> i32 {
-    guard::ffi_guard(GrantError::Null.code(), || todo!("aa_grant_verify"))
+    guard::ffi_guard(GrantError::Null.code(), || {
+        const F: &str = "aa_grant_verify";
+        if grant.is_null()
+            || expected_game.is_null()
+            || head_player.is_null()
+            || head_key.is_null()
+            || revoked.is_null()
+            || out_player.is_null()
+            || out_scope.is_null()
+            || out_expires_ms.is_null()
+        {
+            return fail(F, GrantError::Null);
+        }
+        let head = ChainHead {
+            player: PlayerId(rd(head_player)),
+            key: AliceId(rd(head_key)),
+            since_ms: head_since_ms,
+        };
+        let checked = Grant::from_bytes(core::slice::from_raw_parts(grant, grant_len))
+            .and_then(|g| g.verify(&AliceId(rd(expected_game)), &head, now_ms, &(*revoked).0));
+        match checked {
+            Ok(v) => {
+                wr(&v.player.0, out_player);
+                *out_scope = v.scope;
+                *out_expires_ms = v.expires_ms;
+                AA_PLAYER_OK
+            }
+            Err(e) => fail(F, e),
+        }
+    })
 }
 
 /// Sign the revocation of `grant` (`grant_len` bytes) by `game` and write it into `out`
@@ -140,32 +262,71 @@ pub unsafe extern "C" fn aa_grant_verify(
 /// to `AA_REVOCATION_LEN` writable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn aa_revocation_issue(
-    _game: *const Handle,
-    _grant: *const u8,
-    _grant_len: usize,
-    _revoked_ms: u64,
-    _out: *mut u8,
+    game: *const Handle,
+    grant: *const u8,
+    grant_len: usize,
+    revoked_ms: u64,
+    out: *mut u8,
 ) -> i32 {
-    guard::ffi_guard(GrantError::Null.code(), || todo!("aa_revocation_issue"))
+    guard::ffi_guard(GrantError::Null.code(), || {
+        const F: &str = "aa_revocation_issue";
+        if game.is_null() || grant.is_null() || out.is_null() {
+            return fail(F, GrantError::Null);
+        }
+        let issued = Grant::from_bytes(core::slice::from_raw_parts(grant, grant_len))
+            .and_then(|g| Revocation::issue(&(*game).0, &g, revoked_ms));
+        match issued {
+            Ok(r) => {
+                wr(&r.to_bytes(), out);
+                AA_PLAYER_OK
+            }
+            Err(e) => fail(F, e),
+        }
+    })
 }
 
 /// A revocation set holding at most `capacity` revocations (null when `capacity` is 0).
 #[no_mangle]
-pub extern "C" fn aa_revset_new(_capacity: usize) -> *mut RevSetHandle {
-    guard::ffi_guard(core::ptr::null_mut(), || todo!("aa_revset_new"))
+pub extern "C" fn aa_revset_new(capacity: usize) -> *mut RevSetHandle {
+    guard::ffi_guard(core::ptr::null_mut(), || {
+        match RevocationSet::new(capacity) {
+            Ok(set) => Box::into_raw(Box::new(RevSetHandle(set))),
+            Err(e) => {
+                guard::set_last_error(format!("aa_revset_new: {e}"));
+                core::ptr::null_mut()
+            }
+        }
+    })
 }
 
 /// Add a revocation (`rev_len` bytes) after checking its signature.
+///
+/// `GrantError::Full` (-12) means the revocation was **not** stored and the grant it names
+/// is still accepted: treat it as an emergency, not a retry (move the entries into a larger
+/// set, or stop accepting grants from that game until the revocation is held). Adding a
+/// revocation for a game and nonce the set already holds succeeds and keeps the later
+/// grant expiry, so a nonce the game reused is held until its last grant has expired.
 ///
 /// # Safety
 /// `set` must be a valid set; `rev` must point to `rev_len` readable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn aa_revset_add(
-    _set: *mut RevSetHandle,
-    _rev: *const u8,
-    _rev_len: usize,
+    set: *mut RevSetHandle,
+    rev: *const u8,
+    rev_len: usize,
 ) -> i32 {
-    guard::ffi_guard(GrantError::Null.code(), || todo!("aa_revset_add"))
+    guard::ffi_guard(GrantError::Null.code(), || {
+        const F: &str = "aa_revset_add";
+        if set.is_null() || rev.is_null() {
+            return fail(F, GrantError::Null);
+        }
+        let added = Revocation::from_bytes(core::slice::from_raw_parts(rev, rev_len))
+            .and_then(|r| (*set).0.add(&r));
+        match added {
+            Ok(()) => AA_PLAYER_OK,
+            Err(e) => fail(F, e),
+        }
+    })
 }
 
 /// 1 when the grant `nonce` (16 bytes) of `game` (32 bytes) is revoked, else 0. A null
@@ -175,11 +336,17 @@ pub unsafe extern "C" fn aa_revset_add(
 /// `set` must be a valid set or null; `game` must point to 32 readable bytes, `nonce` to 16.
 #[no_mangle]
 pub unsafe extern "C" fn aa_revset_contains(
-    _set: *const RevSetHandle,
-    _game: *const u8,
-    _nonce: *const u8,
+    set: *const RevSetHandle,
+    game: *const u8,
+    nonce: *const u8,
 ) -> i32 {
-    guard::ffi_guard(1, || todo!("aa_revset_contains"))
+    guard::ffi_guard(1, || {
+        if set.is_null() || game.is_null() || nonce.is_null() {
+            guard::set_last_error("aa_revset_contains: null argument (read as revoked)");
+            return 1;
+        }
+        i32::from((*set).0.contains(&AliceId(rd(game)), &rd(nonce)))
+    })
 }
 
 /// Drop the revocations whose grant has expired at `now_ms`; the number dropped, or -1 for
@@ -188,8 +355,14 @@ pub unsafe extern "C" fn aa_revset_contains(
 /// # Safety
 /// `set` must be a valid set or null.
 #[no_mangle]
-pub unsafe extern "C" fn aa_revset_purge(_set: *mut RevSetHandle, _now_ms: u64) -> i64 {
-    guard::ffi_guard(-1, || todo!("aa_revset_purge"))
+pub unsafe extern "C" fn aa_revset_purge(set: *mut RevSetHandle, now_ms: u64) -> i64 {
+    guard::ffi_guard(-1, || {
+        if set.is_null() {
+            guard::set_last_error("aa_revset_purge: null set");
+            return -1;
+        }
+        i64::try_from((*set).0.purge(now_ms)).unwrap_or(i64::MAX)
+    })
 }
 
 /// The number of revocations held, or -1 for a null set.
@@ -197,8 +370,14 @@ pub unsafe extern "C" fn aa_revset_purge(_set: *mut RevSetHandle, _now_ms: u64) 
 /// # Safety
 /// `set` must be a valid set or null.
 #[no_mangle]
-pub unsafe extern "C" fn aa_revset_len(_set: *const RevSetHandle) -> i64 {
-    guard::ffi_guard(-1, || todo!("aa_revset_len"))
+pub unsafe extern "C" fn aa_revset_len(set: *const RevSetHandle) -> i64 {
+    guard::ffi_guard(-1, || {
+        if set.is_null() {
+            guard::set_last_error("aa_revset_len: null set");
+            return -1;
+        }
+        i64::try_from((*set).0.len()).unwrap_or(i64::MAX)
+    })
 }
 
 /// Free a revocation set (null is ignored).
@@ -212,4 +391,22 @@ pub unsafe extern "C" fn aa_revset_free(set: *mut RevSetHandle) {
             drop(Box::from_raw(set));
         }
     });
+}
+
+/// Record the refusal of `func` for `aa_last_error` and return its code.
+fn fail(func: &str, e: GrantError) -> i32 {
+    guard::set_last_error(format!("{func}: {e}"));
+    e.code()
+}
+
+/// Read `N` bytes from `p` (not null, `N` readable bytes).
+unsafe fn rd<const N: usize>(p: *const u8) -> [u8; N] {
+    let mut a = [0u8; N];
+    core::ptr::copy_nonoverlapping(p, a.as_mut_ptr(), N);
+    a
+}
+
+/// Write `src` to `dst` (not null, `src.len()` writable bytes).
+unsafe fn wr(src: &[u8], dst: *mut u8) {
+    core::ptr::copy_nonoverlapping(src.as_ptr(), dst, src.len());
 }

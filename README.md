@@ -81,8 +81,8 @@ cargo check --no-default-features               # verify no_std build
 | `nizk` | `curve25519-dalek`, `crypto`, `std` | Schnorr NIZK proof (true ZKP, Fiat-Shamir transform) |
 | `db` | `std` | Self-contained BTreeMap audit log |
 | `api` | `std` | API middleware, RBAC, session revocation, distributed rate limiting |
-| `ffi` | `std` | C-ABI FFI — 28 functions (Unity / UE5 / any C-compatible language) |
-| `pyo3` | `std` | Python bindings — 15 functions + 5 classes |
+| `ffi` | `std` | C-ABI FFI — 45 functions (Unity / UE5 / any C-compatible language) |
+| `pyo3` | `std` | Python bindings — 21 functions + 6 classes |
 | `serde` | — | Serialization support for wire types |
 
 ## Quick Start
@@ -392,6 +392,26 @@ let purged = revlist.auto_purge(now_ms, token_ttl_ms);
 
 C ABI: `aa_revlist_revoke` returns `AA_REVLIST_OK` (0), `AA_REVLIST_ERR_NULL` (-1) or `AA_REVLIST_ERR_FULL` (-2); `aa_revlist_new_with_capacity` sets the capacity. The UE5 `Revoke` returns `false` and the Unity `Revoke` throws when the token was not revoked.
 
+### Player grants (core; the revocation set needs `alloc`)
+
+One player id across games. A `PlayerId` is SHA-256 of a domain tag and the player's first key, so it stays the same when the key changes; each key change is a `RotationLink` signed by the key it leaves, and `resolve_chain` checks the links from the first key and returns the current key and the time it became current (no overlap: after a change the old key no longer speaks for the player). A game gives a player a `Grant` (a scope for `issued <= now < expires`, signed by the game's key) and takes it back with a `Revocation`; `Grant::verify` always takes the verifier's `RevocationSet`, checks in a fixed order (signature, game, window, key, revocation) and returns the first refusal as a `GrantError`. Every signature is strict Ed25519 over a 24-byte domain tag and a fixed-length body; the wire forms are 173 (link), 201 (grant) and 129 (revocation) bytes.
+
+```rust
+use alice_auth::{resolve_chain, Grant, Identity, PlayerId, Revocation, RevocationSet};
+
+let player_key = Identity::gen()?;
+let player = PlayerId::from_genesis(&player_key.id());
+let game = Identity::from_seed(&game_seed); // the game's stored issuing key
+let grant = Grant::issue(&game, player, player_key.id(), scope, now_ms, ttl_ms, nonce)?;
+
+let mut revoked = RevocationSet::new(10_000)?;
+let head = resolve_chain(&player_key.id(), &links)?;
+let ok = grant.verify(&game.id(), &head, now_ms, &revoked)?; // ok.player, ok.scope
+revoked.add(&Revocation::issue(&game, &grant, now_ms)?)?;
+```
+
+A full `RevocationSet` refuses a new revocation (`GrantError::Full`) and keeps every one it holds; the refused revocation is not in effect, so treat `Full` as an emergency (a larger set, or stop accepting that game's grants). Entries leave only through `purge(now)`, after the revoked grant has expired. Nonces must be unique per grant (16 random bytes); a reused nonce makes one revocation hold every grant with it until the last of them expires. C ABI: `aa_from_seed`, `aa_player_id_from_genesis`, `aa_rotation_link_issue`, `aa_player_chain_resolve`, `aa_grant_issue`, `aa_grant_verify`, `aa_revocation_issue`, `aa_revset_*` (0 or the negative `GrantError` code; outputs written only on success). UE5: `FAlicePlayer`, `FAliceRevocationSet`, `IdentityFromSeed`. Unity: `AlicePlayer`, `AliceRevocationSet`, `AliceIdentity.FromSeed`. Python: `grant_issue`, `grant_verify`, `RevocationSet`, `GrantError`.
+
 ### RBAC (feature: `api`)
 
 Bitmask-based role/permission system (Read, Write, Admin, Execute) with per-identity policy engine.
@@ -522,11 +542,11 @@ Your identity `alice://did:ed25519:...` is mathematically yours. If a world bans
 
 | Metric | Value |
 |--------|-------|
-| Tests | 145 (0 clippy warnings, 0 fmt diff) |
-| FFI Functions | 28 (C-ABI) |
-| PyO3 Bindings | 15 functions + 5 classes |
-| Unity C# Wrapper | 28 DllImport + 9 classes |
-| UE5 C++ Header | 28 extern C + 8 RAII classes |
+| Tests | 337 with `std,serde,ffi,db,api` (0 clippy warnings, 0 fmt diff) |
+| FFI Functions | 45 (C-ABI) |
+| PyO3 Bindings | 21 functions + 6 classes |
+| Unity C# Wrapper | 42 DllImport + 12 types |
+| UE5 C++ Header | 42 extern C + 10 classes |
 | Eco-System Bridges | 17 (8 + 9) |
 
 ## License

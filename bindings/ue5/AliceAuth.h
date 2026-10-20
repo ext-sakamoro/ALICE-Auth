@@ -70,6 +70,33 @@ extern "C"
     void* aa_derive_child(const void* h, uint32_t index);
     void  aa_derive_session_key(const uint8_t* id_a, const uint8_t* id_b,
                                 const uint8_t* secret, size_t secret_len, uint8_t* o);
+
+    // --- Player (id, key chain, grants, revocations) ---
+    // Every int32_t is 0 on success or a negative GrantError code (-1 null, -2 length,
+    // -3 version, -4 signature, -5 wrong game, -6 not yet valid, -7 expired, -8 revoked,
+    // -9 empty window, -10 wrong key, -11 overflow, -12 full, -13 chain); outputs are
+    // written only on success and aa_last_error describes a refusal.
+    void* aa_from_seed(const uint8_t* seed);
+    int32_t aa_player_id_from_genesis(const uint8_t* genesis, uint8_t* out);
+    int32_t aa_rotation_link_issue(const void* old_key, const uint8_t* player, uint32_t seq,
+                                   const uint8_t* new_key, uint64_t issued_ms, uint8_t* out);
+    int32_t aa_player_chain_resolve(const uint8_t* genesis, const uint8_t* links, size_t n_links,
+                                    uint8_t* out_player, uint8_t* out_key, uint64_t* out_since_ms);
+    int32_t aa_grant_issue(const void* game, const uint8_t* player, const uint8_t* player_key,
+                           uint64_t scope, uint64_t now_ms, uint64_t ttl_ms,
+                           const uint8_t* nonce, uint8_t* out);
+    int32_t aa_grant_verify(const uint8_t* grant, size_t grant_len, const uint8_t* expected_game,
+                            const uint8_t* head_player, const uint8_t* head_key,
+                            uint64_t head_since_ms, uint64_t now_ms, const void* revoked,
+                            uint8_t* out_player, uint64_t* out_scope, uint64_t* out_expires_ms);
+    int32_t aa_revocation_issue(const void* game, const uint8_t* grant, size_t grant_len,
+                                uint64_t revoked_ms, uint8_t* out);
+    void* aa_revset_new(size_t capacity);
+    int32_t aa_revset_add(void* set, const uint8_t* rev, size_t rev_len);
+    int32_t aa_revset_contains(const void* set, const uint8_t* game, const uint8_t* nonce);
+    int64_t aa_revset_purge(void* set, uint64_t now_ms);
+    int64_t aa_revset_len(const void* set);
+    void  aa_revset_free(void* set);
 }
 
 namespace AliceAuth
@@ -425,6 +452,130 @@ struct FAliceCrypto
                                  uint8_t OutKey[32])
     {
         aa_derive_session_key(IdA, IdB, Secret, SecretLen, OutKey);
+    }
+};
+
+// ============================================================================
+// Player: id, key chain, grants, revocations
+// ============================================================================
+
+constexpr size_t AA_ROTATION_LINK_LEN = 173;
+constexpr size_t AA_GRANT_LEN = 201;
+constexpr size_t AA_REVOCATION_LEN = 129;
+
+/// An identity restored from its 32-byte seed. The seed is the secret key: take it from a
+/// secure random source (or from where it was stored) and keep it like a key. The
+/// returned identity is invalid (IsValid() == false) when Seed is null.
+inline FAliceIdentity IdentityFromSeed(const uint8_t Seed[32])
+{
+    return FAliceIdentity(aa_from_seed(Seed));
+}
+
+/// The revocations a verifier knows, with a fixed capacity (RAII, move-only).
+class FAliceRevocationSet
+{
+    void* Handle = nullptr;
+
+public:
+    /// A set holding at most Capacity revocations (invalid when Capacity is 0).
+    explicit FAliceRevocationSet(size_t Capacity)
+        : Handle(aa_revset_new(Capacity))
+    {
+    }
+
+    ~FAliceRevocationSet()
+    {
+        if (Handle) { aa_revset_free(Handle); Handle = nullptr; }
+    }
+
+    FAliceRevocationSet(const FAliceRevocationSet&) = delete;
+    FAliceRevocationSet& operator=(const FAliceRevocationSet&) = delete;
+
+    FAliceRevocationSet(FAliceRevocationSet&& Other) noexcept
+        : Handle(Other.Handle) { Other.Handle = nullptr; }
+
+    FAliceRevocationSet& operator=(FAliceRevocationSet&& Other) noexcept
+    {
+        if (this != &Other)
+        {
+            if (Handle) aa_revset_free(Handle);
+            Handle = Other.Handle;
+            Other.Handle = nullptr;
+        }
+        return *this;
+    }
+
+    bool IsValid() const { return Handle != nullptr; }
+    const void* GetHandle() const { return Handle; }
+
+    /// Add a revocation (AA_REVOCATION_LEN bytes). 0 when it is held. -12 (full) means it
+    /// was NOT stored and the grant is still accepted: treat it as an emergency (a larger
+    /// set, or stop accepting that game's grants), not as a retry.
+    [[nodiscard]] int32_t Add(const uint8_t* Revocation, size_t Len)
+    {
+        return aa_revset_add(Handle, Revocation, Len);
+    }
+
+    /// True when the grant Nonce of Game is revoked (an invalid set reads as revoked).
+    bool Contains(const uint8_t Game[32], const uint8_t Nonce[16]) const
+    {
+        return aa_revset_contains(Handle, Game, Nonce) != 0;
+    }
+
+    /// Drop the revocations of grants expired at NowMs; the number dropped (-1 if invalid).
+    int64_t Purge(uint64_t NowMs) { return aa_revset_purge(Handle, NowMs); }
+
+    /// The number of revocations held (-1 if invalid).
+    int64_t Num() const { return aa_revset_len(Handle); }
+};
+
+/// A game's grants to players (thin wrappers; each returns 0 or a GrantError code).
+struct FAlicePlayer
+{
+    static int32_t IdFromGenesis(const uint8_t Genesis[32], uint8_t OutPlayer[32])
+    {
+        return aa_player_id_from_genesis(Genesis, OutPlayer);
+    }
+
+    static int32_t IssueRotationLink(const FAliceIdentity& OldKey, const uint8_t Player[32],
+                                     uint32_t Seq, const uint8_t NewKey[32], uint64_t IssuedMs,
+                                     uint8_t OutLink[AA_ROTATION_LINK_LEN])
+    {
+        return aa_rotation_link_issue(OldKey.GetHandle(), Player, Seq, NewKey, IssuedMs, OutLink);
+    }
+
+    /// Links: NumLinks links of AA_ROTATION_LINK_LEN bytes each, back to back.
+    static int32_t ResolveChain(const uint8_t Genesis[32], const uint8_t* Links, size_t NumLinks,
+                                uint8_t OutPlayer[32], uint8_t OutKey[32], uint64_t& OutSinceMs)
+    {
+        return aa_player_chain_resolve(Genesis, Links, NumLinks, OutPlayer, OutKey, &OutSinceMs);
+    }
+
+    static int32_t IssueGrant(const FAliceIdentity& Game, const uint8_t Player[32],
+                              const uint8_t PlayerKey[32], uint64_t Scope, uint64_t NowMs,
+                              uint64_t TtlMs, const uint8_t Nonce[16],
+                              uint8_t OutGrant[AA_GRANT_LEN])
+    {
+        return aa_grant_issue(Game.GetHandle(), Player, PlayerKey, Scope, NowMs, TtlMs, Nonce,
+                              OutGrant);
+    }
+
+    /// 0 when the grant is valid for ExpectedGame at NowMs (the window excludes its expiry).
+    static int32_t VerifyGrant(const uint8_t* Grant, size_t GrantLen,
+                               const uint8_t ExpectedGame[32], const uint8_t HeadPlayer[32],
+                               const uint8_t HeadKey[32], uint64_t HeadSinceMs, uint64_t NowMs,
+                               const FAliceRevocationSet& Revoked, uint8_t OutPlayer[32],
+                               uint64_t& OutScope, uint64_t& OutExpiresMs)
+    {
+        return aa_grant_verify(Grant, GrantLen, ExpectedGame, HeadPlayer, HeadKey, HeadSinceMs,
+                               NowMs, Revoked.GetHandle(), OutPlayer, &OutScope, &OutExpiresMs);
+    }
+
+    static int32_t IssueRevocation(const FAliceIdentity& Game, const uint8_t* Grant,
+                                   size_t GrantLen, uint64_t RevokedMs,
+                                   uint8_t OutRevocation[AA_REVOCATION_LEN])
+    {
+        return aa_revocation_issue(Game.GetHandle(), Grant, GrantLen, RevokedMs, OutRevocation);
     }
 };
 

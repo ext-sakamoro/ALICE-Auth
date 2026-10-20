@@ -40,6 +40,12 @@ fn handle(seed: u8) -> *mut Handle {
     h
 }
 
+/// One refusal of `aa_grant_verify`: name, grant bytes, expected game, head, now, error.
+type VerifyCase<'a> = (&'a str, &'a [u8], &'a [u8; 32], Head, u64, GrantError);
+
+/// A call whose code is checked after `aa_last_error` was cleared.
+type Call<'a> = Box<dyn Fn() -> i32 + 'a>;
+
 /// The text of `aa_last_error`, consumed.
 fn last_error() -> Option<String> {
     let p = aa_last_error();
@@ -101,8 +107,8 @@ fn verify(
             now_ms,
             set,
             player.as_mut_ptr(),
-            &mut scope,
-            &mut expires,
+            &raw mut scope,
+            &raw mut expires,
         )
     };
     (code, player, scope, expires)
@@ -167,7 +173,7 @@ fn the_chain_resolves_as_in_rust() {
             1,
             player.as_mut_ptr(),
             key.as_mut_ptr(),
-            &mut since,
+            &raw mut since,
         )
     };
     assert_eq!(code, AA_PLAYER_OK);
@@ -180,11 +186,30 @@ fn the_chain_resolves_as_in_rust() {
             0,
             player.as_mut_ptr(),
             key.as_mut_ptr(),
-            &mut since,
+            &raw mut since,
         )
     };
     assert_eq!(code, AA_PLAYER_OK);
     assert_eq!((player, key, since), (bytes(PLAYER), bytes(K1), 0));
+}
+
+/// A link count whose byte length does not fit in `usize` is refused before any read.
+#[test]
+fn a_link_count_that_overflows_is_refused() {
+    let link = bytes::<ROTATION_LINK_LEN>(LINK0);
+    let (mut player, mut key, mut since) = ([FILL; 32], [FILL; 32], 0u64);
+    aa_clear_last_error();
+    let code = unsafe {
+        aa_player_chain_resolve(
+            bytes::<32>(K1).as_ptr(),
+            link.as_ptr(),
+            usize::MAX / ROTATION_LINK_LEN + 1,
+            player.as_mut_ptr(),
+            key.as_mut_ptr(),
+            &raw mut since,
+        )
+    };
+    assert_refused(code, GrantError::Length, "aa_player_chain_resolve", &player);
 }
 
 #[test]
@@ -200,7 +225,7 @@ fn a_broken_chain_is_refused_with_the_rust_code() {
             1,
             player.as_mut_ptr(),
             key.as_mut_ptr(),
-            &mut since,
+            &raw mut since,
         )
     };
     assert_refused(
@@ -220,7 +245,7 @@ fn a_broken_chain_is_refused_with_the_rust_code() {
             0,
             player.as_mut_ptr(),
             key.as_mut_ptr(),
-            &mut since,
+            &raw mut since,
         )
     };
     assert_refused(code, GrantError::Chain, "aa_player_chain_resolve", &player);
@@ -234,7 +259,7 @@ fn a_broken_chain_is_refused_with_the_rust_code() {
             1,
             player.as_mut_ptr(),
             key.as_mut_ptr(),
-            &mut since,
+            &raw mut since,
         )
     };
     assert_refused(
@@ -279,28 +304,33 @@ fn issue_and_verify_match_the_rust_api() {
     }
 }
 
+/// `Grant::verify` on the same inputs (the Rust side of each comparison).
+fn rust_verify(
+    b: &[u8],
+    game: &[u8; 32],
+    h: &Head,
+    now: u64,
+    s: &RevocationSet,
+) -> Result<(), GrantError> {
+    let head = ChainHead {
+        player: PlayerId(h.player),
+        key: alice_auth::AliceId(h.key),
+        since_ms: h.since_ms,
+    };
+    Grant::from_bytes(b).and_then(|g| {
+        g.verify(&alice_auth::AliceId(*game), &head, now, s)
+            .map(|_| ())
+    })
+}
+
 /// Every refusal of `Grant::verify` comes out of `aa_grant_verify` with the same code,
 /// with the outputs untouched.
 #[test]
 fn every_verify_refusal_has_the_rust_code() {
     let good = bytes::<GRANT_LEN>(GRANT0);
-    let game = bytes::<32>(GAME);
+    let (game, other_game) = (bytes::<32>(GAME), bytes::<32>(K1));
     let set = aa_revset_new(4);
     let rust_set = RevocationSet::new(4).expect("set");
-    let rust = |b: &[u8], h: &Head, now: u64, s: &RevocationSet| {
-        Grant::from_bytes(b).and_then(|g| {
-            g.verify(
-                &alice_auth::AliceId(game),
-                &ChainHead {
-                    player: PlayerId(h.player),
-                    key: alice_auth::AliceId(h.key),
-                    since_ms: h.since_ms,
-                },
-                now,
-                s,
-            )
-        })
-    };
     let mut flipped = good;
     flipped[140] ^= 1;
     let mut v2 = good;
@@ -309,65 +339,59 @@ fn every_verify_refusal_has_the_rust_code() {
         key: bytes(K1),
         ..head()
     };
-    let cases: [(&str, Vec<u8>, Head, u64, GrantError); 7] = [
+    let g = &good[..];
+    let cases: [VerifyCase<'_>; 7] = [
         (
             "length",
-            good[..200].to_vec(),
+            &good[..200],
+            &game,
             head(),
             2000,
             GrantError::Length,
         ),
-        ("version", v2.to_vec(), head(), 2000, GrantError::Version),
+        ("version", &v2, &game, head(), 2000, GrantError::Version),
         (
             "signature",
-            flipped.to_vec(),
+            &flipped,
+            &game,
             head(),
             2000,
             GrantError::Signature,
         ),
-        (
-            "not yet",
-            good.to_vec(),
-            head(),
-            1499,
-            GrantError::NotYetValid,
-        ),
+        ("not yet", g, &game, head(), 1499, GrantError::NotYetValid),
         (
             "expired at the end",
-            good.to_vec(),
+            g,
+            &game,
             head(),
             5000,
             GrantError::Expired,
         ),
         (
             "another key",
-            good.to_vec(),
+            g,
+            &game,
             other_key,
             2000,
             GrantError::WrongKey,
         ),
         (
             "another game",
-            good.to_vec(),
+            g,
+            &other_game,
             head(),
             2000,
             GrantError::WrongGame,
         ),
     ];
-    for (name, b, h, now, want) in cases {
-        let expected_game = if name == "another game" {
-            bytes::<32>(K1)
-        } else {
-            game
-        };
-        let rust_res = if name == "another game" {
-            Err(GrantError::WrongGame)
-        } else {
-            rust(&b, &h, now, &rust_set).map(|_| ())
-        };
-        assert_eq!(rust_res, Err(want), "rust {name}");
+    for (name, b, expected, h, now, want) in cases {
+        assert_eq!(
+            rust_verify(b, expected, &h, now, &rust_set),
+            Err(want),
+            "rust {name}"
+        );
         aa_clear_last_error();
-        let (code, player, scope, expires) = verify(&b, &expected_game, &h, now, set);
+        let (code, player, scope, expires) = verify(b, expected, &h, now, set);
         assert_refused(code, want, "aa_grant_verify", &player);
         assert_eq!(
             scope,
@@ -380,13 +404,28 @@ fn every_verify_refusal_has_the_rust_code() {
             "{name}: expiry written"
         );
     }
-    // revoked
+    unsafe { aa_revset_free(set) };
+}
+
+#[test]
+fn a_revoked_grant_is_refused_through_the_c_abi() {
+    let good = bytes::<GRANT_LEN>(GRANT0);
+    let game = bytes::<32>(GAME);
+    let set = aa_revset_new(4);
     let rev = bytes::<REVOCATION_LEN>(REVOCATION0);
     assert_eq!(
         unsafe { aa_revset_add(set, rev.as_ptr(), rev.len()) },
         AA_PLAYER_OK
     );
     assert_eq!(unsafe { aa_revset_len(set) }, 1);
+    let mut rust_set = RevocationSet::new(4).expect("set");
+    rust_set
+        .add(&alice_auth::Revocation::from_bytes(&rev).expect("parse"))
+        .expect("add");
+    assert_eq!(
+        rust_verify(&good, &game, &head(), 2000, &rust_set),
+        Err(GrantError::Revoked)
+    );
     aa_clear_last_error();
     let (code, player, _, _) = verify(&good, &game, &head(), 2000, set);
     assert_refused(code, GrantError::Revoked, "aa_grant_verify", &player);
@@ -517,6 +556,105 @@ fn the_revocation_set_through_the_c_abi() {
     }
 }
 
+/// One call per pointer argument of the player C ABI, each with that argument null.
+fn null_calls<'a>(
+    g: *mut Handle,
+    k: &'a [u8; 32],
+    p: &'a [u8; 32],
+    grant: &'a [u8; GRANT_LEN],
+    set: *mut alice_auth::RevSetHandle,
+    (o32p, outp, sincep): (*mut u8, *mut u8, *mut u64),
+) -> Vec<(&'static str, Call<'a>)> {
+    vec![
+        (
+            "aa_player_id_from_genesis",
+            Box::new(move || unsafe { aa_player_id_from_genesis(null(), o32p) }),
+        ),
+        (
+            "aa_player_id_from_genesis",
+            Box::new(move || unsafe { aa_player_id_from_genesis(k.as_ptr(), null_mut()) }),
+        ),
+        (
+            "aa_rotation_link_issue",
+            Box::new(move || unsafe {
+                aa_rotation_link_issue(null(), p.as_ptr(), 0, k.as_ptr(), 1000, outp)
+            }),
+        ),
+        (
+            "aa_rotation_link_issue",
+            Box::new(move || unsafe {
+                aa_rotation_link_issue(g, p.as_ptr(), 0, k.as_ptr(), 1000, null_mut())
+            }),
+        ),
+        (
+            "aa_player_chain_resolve",
+            Box::new(move || unsafe {
+                aa_player_chain_resolve(k.as_ptr(), null(), 1, o32p, o32p, sincep)
+            }),
+        ),
+        (
+            "aa_player_chain_resolve",
+            Box::new(move || unsafe {
+                aa_player_chain_resolve(k.as_ptr(), null(), 0, o32p, o32p, null_mut())
+            }),
+        ),
+        (
+            "aa_grant_issue",
+            Box::new(move || unsafe {
+                aa_grant_issue(g, p.as_ptr(), k.as_ptr(), SCOPE, 1500, 3500, null(), outp)
+            }),
+        ),
+        (
+            "aa_grant_verify",
+            Box::new(move || unsafe {
+                aa_grant_verify(
+                    grant.as_ptr(),
+                    GRANT_LEN,
+                    k.as_ptr(),
+                    p.as_ptr(),
+                    k.as_ptr(),
+                    1000,
+                    2000,
+                    null(),
+                    o32p,
+                    sincep,
+                    sincep,
+                )
+            }),
+        ),
+        (
+            "aa_grant_verify",
+            Box::new(move || unsafe {
+                aa_grant_verify(
+                    null(),
+                    GRANT_LEN,
+                    k.as_ptr(),
+                    p.as_ptr(),
+                    k.as_ptr(),
+                    1000,
+                    2000,
+                    set,
+                    o32p,
+                    sincep,
+                    sincep,
+                )
+            }),
+        ),
+        (
+            "aa_revocation_issue",
+            Box::new(move || unsafe { aa_revocation_issue(g, null(), GRANT_LEN, 3000, outp) }),
+        ),
+        (
+            "aa_revset_add",
+            Box::new(move || unsafe { aa_revset_add(null_mut(), grant.as_ptr(), REVOCATION_LEN) }),
+        ),
+        (
+            "aa_revset_add",
+            Box::new(move || unsafe { aa_revset_add(set, null(), REVOCATION_LEN) }),
+        ),
+    ]
+}
+
 /// A null argument is `GrantError::Null` with a message, never a crash, and writes nothing;
 /// a null set or null query in `aa_revset_contains` reads as revoked (fail-closed).
 #[test]
@@ -529,92 +667,12 @@ fn null_arguments_are_refused() {
     let mut o32 = [FILL; 32];
     let mut since = 0u64;
     let set = aa_revset_new(1);
-    let null_cases: Vec<(&str, i32)> = vec![
-        ("aa_player_id_from_genesis", unsafe {
-            aa_player_id_from_genesis(null(), o32.as_mut_ptr())
-        }),
-        ("aa_player_id_from_genesis", unsafe {
-            aa_player_id_from_genesis(k.as_ptr(), null_mut())
-        }),
-        ("aa_rotation_link_issue", unsafe {
-            aa_rotation_link_issue(null(), p.as_ptr(), 0, k.as_ptr(), 1000, out.as_mut_ptr())
-        }),
-        ("aa_rotation_link_issue", unsafe {
-            aa_rotation_link_issue(g, p.as_ptr(), 0, k.as_ptr(), 1000, null_mut())
-        }),
-        ("aa_player_chain_resolve", unsafe {
-            aa_player_chain_resolve(
-                k.as_ptr(),
-                null(),
-                1,
-                o32.as_mut_ptr(),
-                o32.as_mut_ptr(),
-                &mut since,
-            )
-        }),
-        ("aa_player_chain_resolve", unsafe {
-            aa_player_chain_resolve(
-                k.as_ptr(),
-                null(),
-                0,
-                o32.as_mut_ptr(),
-                o32.as_mut_ptr(),
-                null_mut(),
-            )
-        }),
-        ("aa_grant_issue", unsafe {
-            aa_grant_issue(
-                g,
-                p.as_ptr(),
-                k.as_ptr(),
-                SCOPE,
-                1500,
-                3500,
-                null(),
-                out.as_mut_ptr(),
-            )
-        }),
-        ("aa_grant_verify", unsafe {
-            aa_grant_verify(
-                grant.as_ptr(),
-                GRANT_LEN,
-                k.as_ptr(),
-                p.as_ptr(),
-                k.as_ptr(),
-                1000,
-                2000,
-                null(),
-                o32.as_mut_ptr(),
-                &mut since,
-                &mut since,
-            )
-        }),
-        ("aa_grant_verify", unsafe {
-            aa_grant_verify(
-                null(),
-                GRANT_LEN,
-                k.as_ptr(),
-                p.as_ptr(),
-                k.as_ptr(),
-                1000,
-                2000,
-                set,
-                o32.as_mut_ptr(),
-                &mut since,
-                &mut since,
-            )
-        }),
-        ("aa_revocation_issue", unsafe {
-            aa_revocation_issue(g, null(), GRANT_LEN, 3000, out.as_mut_ptr())
-        }),
-        ("aa_revset_add", unsafe {
-            aa_revset_add(null_mut(), grant.as_ptr(), REVOCATION_LEN)
-        }),
-        ("aa_revset_add", unsafe {
-            aa_revset_add(set, null(), REVOCATION_LEN)
-        }),
-    ];
-    for (func, code) in null_cases {
+    let (o32p, outp, sincep): (*mut u8, *mut u8, *mut u64) =
+        (o32.as_mut_ptr(), out.as_mut_ptr(), &raw mut since);
+    let null_cases = null_calls(g, &k, &p, &grant, set, (o32p, outp, sincep));
+    for (func, call) in null_cases {
+        aa_clear_last_error();
+        let code = call();
         assert_eq!(code, GrantError::Null.code(), "{func}");
         assert!(last_error().is_some_and(|m| m.contains(func)), "{func}");
     }
