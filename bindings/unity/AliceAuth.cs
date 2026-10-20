@@ -47,7 +47,9 @@ namespace Alice.Auth
 
         // --- RevocationList ---
         [DllImport(Lib)] internal static extern IntPtr aa_revlist_new();
-        [DllImport(Lib)] internal static extern void aa_revlist_revoke(IntPtr h, byte[] token, ulong now_ms);
+        [DllImport(Lib)] internal static extern IntPtr aa_revlist_new_with_capacity(uint capacity);
+        // 0 = revoked, -1 = null argument, -2 = list full (token NOT revoked)
+        [DllImport(Lib)] internal static extern int aa_revlist_revoke(IntPtr h, byte[] token, ulong now_ms);
         [DllImport(Lib)] internal static extern int aa_revlist_is_revoked(IntPtr h, byte[] token);
         [DllImport(Lib)] internal static extern uint aa_revlist_auto_purge(IntPtr h, ulong now_ms, ulong ttl_ms);
         [DllImport(Lib)] internal static extern void aa_revlist_free(IntPtr h);
@@ -256,12 +258,25 @@ namespace Alice.Auth
                 throw new InvalidOperationException("ALICE-Auth: revlist alloc failed");
         }
 
-        /// <summary>Revoke a 16-byte session token.</summary>
+        /// <summary>A list holding at most capacity entries (at least 1).</summary>
+        public AliceRevocationList(uint capacity)
+        {
+            handle = Native.aa_revlist_new_with_capacity(capacity);
+            if (handle == IntPtr.Zero)
+                throw new InvalidOperationException("ALICE-Auth: revlist alloc failed");
+        }
+
+        /// <summary>Revoke a 16-byte session token. Throws when the list is
+        /// full: the token is then NOT revoked and no earlier entry is dropped.</summary>
         public void Revoke(byte[] token, ulong nowMs)
         {
             if (token == null || token.Length != 16)
                 throw new ArgumentException("token must be 16 bytes");
-            Native.aa_revlist_revoke(handle, token, nowMs);
+            int rc = Native.aa_revlist_revoke(handle, token, nowMs);
+            if (rc == -2)
+                throw new InvalidOperationException("ALICE-Auth: revocation list is full; the token was not revoked");
+            if (rc != 0)
+                throw new InvalidOperationException("ALICE-Auth: revoke failed; the token was not revoked");
         }
 
         /// <summary>Check if a token is revoked (constant-time).</summary>

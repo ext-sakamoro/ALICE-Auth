@@ -283,8 +283,8 @@ trusted = aa.verify_endorsement(endorsement, now_ms)
 token = aa.token_create(now_ms, ttl_ms)
 expired = aa.token_is_expired(token, now_ms)
 
-# Session revocation
-revlist = aa.RevocationList()
+# Session revocation (raises RuntimeError when the list is full; the token is then not revoked)
+revlist = aa.RevocationList()          # or aa.RevocationList(capacity=50_000)
 revlist.revoke(token_bytes, now_ms)
 is_revoked = revlist.is_revoked(token_bytes)
 
@@ -372,18 +372,24 @@ Structured 17-byte authentication tokens with creation timestamp and TTL-based e
 
 ### Session Revocation (feature: `api`)
 
-Constant-time token blacklist with timestamped entries, max capacity, and auto-purge of expired entries.
+Constant-time token blacklist with timestamped entries and a maximum capacity. A revoked token stays revoked: when the list is full, `revoke` returns `Err(RevokeError::Full)` and records nothing, and no earlier entry is dropped to make room. Entries leave the list only through an explicit `purge` (by value) or `auto_purge` (by age; pass the longest token lifetime).
 
 ```rust
-use alice_auth::RevocationList;
+use alice_auth::api_bridge::{RevocationList, RevokeError};
 
-let mut revlist = RevocationList::new();
-revlist.revoke(&token, now_ms);
-assert!(revlist.is_revoked(&token));
+let mut revlist = RevocationList::new(); // or RevocationList::with_capacity(n)
+match revlist.revoke(&token, now_ms) {
+    Ok(()) => assert!(revlist.is_revoked(&token)),
+    // The token is NOT revoked: free room with auto_purge or raise the capacity
+    Err(RevokeError::Full { capacity }) => { /* ... */ }
+    Err(_) => { /* ... */ }
+}
 
-// Purge entries older than ttl_ms
-let purged = revlist.auto_purge(now_ms, ttl_ms);
+// Remove entries revoked more than the token lifetime ago
+let purged = revlist.auto_purge(now_ms, token_ttl_ms);
 ```
+
+C ABI: `aa_revlist_revoke` returns `AA_REVLIST_OK` (0), `AA_REVLIST_ERR_NULL` (-1) or `AA_REVLIST_ERR_FULL` (-2); `aa_revlist_new_with_capacity` sets the capacity. The UE5 `Revoke` returns `false` and the Unity `Revoke` throws when the token was not revoked.
 
 ### RBAC (feature: `api`)
 

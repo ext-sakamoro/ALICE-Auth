@@ -582,7 +582,7 @@ fn endorsement_tampered_sig_is_invalid() {
 mod api_tests {
     use alice_auth::api_bridge::{
         AuthMiddleware, AuthRequest, AuthResponse, AuthToken, Permission, PolicyEngine,
-        RevocationList, Role,
+        RevocationList, RevokeError, Role,
     };
     use alice_auth::Identity;
 
@@ -633,16 +633,19 @@ mod api_tests {
     }
 
     #[test]
-    fn revocation_with_capacity_1_evicts_on_second() {
+    fn revocation_with_capacity_1_refuses_the_second() {
         let mut rl = RevocationList::with_capacity(1);
         let tok_a = [0x01u8; 16];
         let tok_b = [0x02u8; 16];
-        rl.revoke(&tok_a, 1000);
+        rl.revoke(&tok_a, 1000).unwrap();
         assert!(rl.is_revoked(&tok_a));
-        rl.revoke(&tok_b, 2000);
-        // tok_a evicted
-        assert!(!rl.is_revoked(&tok_a));
-        assert!(rl.is_revoked(&tok_b));
+        assert_eq!(
+            rl.revoke(&tok_b, 2000),
+            Err(RevokeError::Full { capacity: 1 })
+        );
+        // tok_a stays revoked; tok_b was refused, not silently dropped
+        assert!(rl.is_revoked(&tok_a));
+        assert!(!rl.is_revoked(&tok_b));
         assert_eq!(rl.len(), 1);
     }
 
@@ -656,7 +659,7 @@ mod api_tests {
     #[test]
     fn revocation_auto_purge_no_expired() {
         let mut rl = RevocationList::new();
-        rl.revoke(&[0xAA; 16], 5000);
+        rl.revoke(&[0xAA; 16], 5000).unwrap();
         let purged = rl.auto_purge(6000, 5000); // 6000-5000=1000 <= 5000 → keep
         assert_eq!(purged, 0);
         assert_eq!(rl.len(), 1);
@@ -665,8 +668,8 @@ mod api_tests {
     #[test]
     fn revocation_auto_purge_all_expired() {
         let mut rl = RevocationList::new();
-        rl.revoke(&[0x11; 16], 1000);
-        rl.revoke(&[0x22; 16], 2000);
+        rl.revoke(&[0x11; 16], 1000).unwrap();
+        rl.revoke(&[0x22; 16], 2000).unwrap();
         let purged = rl.auto_purge(100_000, 100); // all way older than 100ms
         assert_eq!(purged, 2);
         assert!(rl.is_empty());
