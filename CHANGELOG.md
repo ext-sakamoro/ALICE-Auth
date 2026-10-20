@@ -5,6 +5,7 @@ All notable changes to ALICE-Auth will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- **Breaking** `AuthToken::new` (const fn のまま)、`AuthMiddleware::create_auth_token`、`JwtClaims::with_iat` は `Result` を返す 期限 (`now_ms + ttl_ms` / `iat + ttl`) が `u64::MAX` を超える時は `AuthError::E6` 以前は release で wrap して期限が過去になっていた (debug は panic) C ABI の `aa_token_create` は `int32_t` を返す (`AA_TOKEN_OK` 0 / `AA_TOKEN_ERR_NULL` -1 / `AA_TOKEN_ERR_OVERFLOW` -2、失敗時は出力に書かず `aa_last_error` に理由) UE5 は `[[nodiscard]] bool`、Unity は例外、Python の `token_create` は `ValueError` 期限の境界の解釈は変えていない 試験 `tests/token_overflow.rs` 移行: `AuthToken::new(..)` / `.with_iat(..)` の結果を `?` か `match` で受ける
 - **Breaking** `endorse` は `Result<Endorsement>` を返す `now_ms + ttl_ms` が `u64::MAX` を超える時は `AuthError::E6` (新しい code、桁あふれ) で何も署名しない 以前は release で wrap して期限が過去になり、発行した endorsement が即座に期限切れだった (debug は panic) C ABI の `aa_endorse` は `int32_t` を返す (`AA_ENDORSE_OK` 0 / `AA_ENDORSE_ERR_NULL` -1 / `AA_ENDORSE_ERR_OVERFLOW` -2、失敗時は出力に書かず `aa_last_error` に理由) UE5 の `FAliceEndorsement::Endorse` は `[[nodiscard]] bool`、Unity は例外、Python は `ValueError` `ttl_ms = 0` は `expires_ms == now_ms` で、`verify_endorsement` (now_ms > expires_ms で拒む) ではその時刻にだけ通る
 - **Breaking** `AuthError` に `E6` を足し `#[non_exhaustive]` にした (以後の code の追加は破壊的にならない) 既存の E1-E5 の番号は変えていない (試験で固定) 試験 `tests/endorse_overflow.rs`
 - 移行: `endorse(..)` の結果を `?` か `match` で受ける `AuthError` を網羅する `match` には `_` の腕を足す

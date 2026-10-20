@@ -43,7 +43,8 @@ namespace Alice.Auth
         [DllImport(Lib)] internal static extern void aa_rotating_free(IntPtr h);
 
         // --- AuthToken ---
-        [DllImport(Lib)] internal static extern void aa_token_create(ulong now_ms, ulong ttl_ms, byte[] o);
+        // 0 = written, -1 = null output, -2 = now_ms + ttl_ms exceeds u64::MAX (o untouched)
+        [DllImport(Lib)] internal static extern int aa_token_create(ulong now_ms, ulong ttl_ms, byte[] o);
         [DllImport(Lib)] internal static extern int aa_token_is_expired(byte[] data, ulong now_ms);
 
         // --- RevocationList ---
@@ -235,7 +236,11 @@ namespace Alice.Auth
         public static byte[] Create(ulong nowMs, ulong ttlMs)
         {
             var o = new byte[17];
-            Native.aa_token_create(nowMs, ttlMs, o);
+            int rc = Native.aa_token_create(nowMs, ttlMs, o);
+            if (rc == -2)
+                throw new ArgumentOutOfRangeException(nameof(ttlMs), "nowMs + ttlMs exceeds u64::MAX");
+            if (rc != 0)
+                throw new InvalidOperationException("ALICE-Auth: token create failed");
             return o;
         }
 

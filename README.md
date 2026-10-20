@@ -280,7 +280,7 @@ endorsement = aa.endorse(identity, target_id, now_ms, ttl_ms)  # ValueError if n
 trusted = aa.verify_endorsement(endorsement, now_ms)
 
 # Auth token
-token = aa.token_create(now_ms, ttl_ms)
+token = aa.token_create(now_ms, ttl_ms)  # ValueError if now_ms + ttl_ms exceeds u64::MAX
 expired = aa.token_is_expired(token, now_ms)
 
 # Session revocation (raises RuntimeError when the list is full; the token is then not revoked)

@@ -31,12 +31,18 @@ impl AuthToken {
     pub const SIZE: usize = 17;
 
     /// Create a new auth token with explicit timestamp.
-    #[must_use]
-    pub const fn new(now_ms: u64, ttl_ms: u64) -> Self {
-        Self {
-            version: Self::V1,
-            expires_ms: now_ms + ttl_ms,
-            nonce_ms: now_ms,
+    ///
+    /// # Errors
+    ///
+    /// [`crate::AuthError::E6`] when `now_ms + ttl_ms` exceeds `u64::MAX`.
+    pub const fn new(now_ms: u64, ttl_ms: u64) -> crate::Result<Self> {
+        match now_ms.checked_add(ttl_ms) {
+            Some(expires_ms) => Ok(Self {
+                version: Self::V1,
+                expires_ms,
+                nonce_ms: now_ms,
+            }),
+            None => Err(crate::AuthError::E6),
         }
     }
 
@@ -419,9 +425,12 @@ impl AuthMiddleware {
     }
 
     /// Create a structured auth token with explicit timestamp.
-    #[must_use]
-    pub fn create_auth_token(now_ms: u64, ttl_ms: u64) -> Vec<u8> {
-        AuthToken::new(now_ms, ttl_ms).to_bytes().to_vec()
+    ///
+    /// # Errors
+    ///
+    /// [`crate::AuthError::E6`] when `now_ms + ttl_ms` exceeds `u64::MAX`.
+    pub fn create_auth_token(now_ms: u64, ttl_ms: u64) -> crate::Result<Vec<u8>> {
+        AuthToken::new(now_ms, ttl_ms).map(|t| t.to_bytes().to_vec())
     }
 
     /// Sliding window rate limiter.
@@ -499,7 +508,7 @@ mod tests {
 
     #[test]
     fn test_auth_token_roundtrip() {
-        let token = AuthToken::new(1000, 60_000);
+        let token = AuthToken::new(1000, 60_000).unwrap();
         assert_eq!(token.version, 1);
         assert_eq!(token.expires_ms, 61_000);
         assert_eq!(token.nonce_ms, 1000);
@@ -513,7 +522,7 @@ mod tests {
 
     #[test]
     fn test_auth_token_expired() {
-        let token = AuthToken::new(1000, 5000);
+        let token = AuthToken::new(1000, 5000).unwrap();
         assert!(!token.is_expired(3000));
         assert!(!token.is_expired(6000));
         assert!(token.is_expired(6001));
@@ -521,7 +530,7 @@ mod tests {
 
     #[test]
     fn test_auth_token_invalid_version() {
-        let mut bytes = AuthToken::new(1000, 5000).to_bytes();
+        let mut bytes = AuthToken::new(1000, 5000).unwrap().to_bytes();
         bytes[0] = 99;
         assert!(AuthToken::from_bytes(&bytes).is_none());
     }
@@ -535,7 +544,7 @@ mod tests {
 
     #[test]
     fn test_create_auth_token() {
-        let token = AuthMiddleware::create_auth_token(1000, 60_000);
+        let token = AuthMiddleware::create_auth_token(1000, 60_000).unwrap();
         assert_eq!(token.len(), AuthToken::SIZE);
         let parsed = AuthToken::from_bytes(&token).unwrap();
         assert_eq!(parsed.expires_ms, 61_000);
@@ -571,7 +580,7 @@ mod tests {
     #[test]
     fn test_verify_valid_request() {
         let i = crate::Identity::gen().unwrap();
-        let token = AuthMiddleware::create_auth_token(1000, 60_000);
+        let token = AuthMiddleware::create_auth_token(1000, 60_000).unwrap();
         let sig = i.sign(&token);
         let req = AuthRequest {
             token,
@@ -588,7 +597,7 @@ mod tests {
     #[test]
     fn test_verify_invalid_signature() {
         let i = crate::Identity::gen().unwrap();
-        let token = AuthMiddleware::create_auth_token(1000, 60_000);
+        let token = AuthMiddleware::create_auth_token(1000, 60_000).unwrap();
         let bad_sig = crate::AliceSig::new([0u8; 64]);
         let req = AuthRequest {
             token,
@@ -629,7 +638,7 @@ mod tests {
     #[test]
     fn test_verify_expired_token() {
         let i = crate::Identity::gen().unwrap();
-        let token = AuthMiddleware::create_auth_token(1000, 5000); // expires at 6000
+        let token = AuthMiddleware::create_auth_token(1000, 5000).unwrap(); // expires at 6000
         let sig = i.sign(&token);
         let req = AuthRequest {
             token,
@@ -679,7 +688,7 @@ mod tests {
 
     #[test]
     fn test_create_auth_token_zero_ttl() {
-        let token = AuthMiddleware::create_auth_token(1000, 0);
+        let token = AuthMiddleware::create_auth_token(1000, 0).unwrap();
         assert_eq!(token.len(), AuthToken::SIZE);
     }
 
@@ -765,7 +774,7 @@ mod tests {
     #[test]
     fn test_revocation_in_middleware() {
         let i = crate::Identity::gen().unwrap();
-        let token = AuthMiddleware::create_auth_token(1000, 60_000);
+        let token = AuthMiddleware::create_auth_token(1000, 60_000).unwrap();
         let sig = i.sign(&token);
 
         let mut tok16 = [0u8; 16];

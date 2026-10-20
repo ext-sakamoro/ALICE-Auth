@@ -221,7 +221,7 @@ fn the_api_middleware_refuses_the_small_order_key() {
     use alice_auth::api_bridge::{AuthMiddleware, AuthRequest, AuthResponse, AuthToken};
     let mut mw = AuthMiddleware::new();
     let req = AuthRequest {
-        token: AuthToken::new(1_000, 60_000).to_bytes().to_vec(),
+        token: AuthToken::new(1_000, 60_000).unwrap().to_bytes().to_vec(),
         signature: sig(ANY_MESSAGE),
         identity: id(IDENTITY),
     };
