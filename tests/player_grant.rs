@@ -243,6 +243,15 @@ fn a_grant_for_a_key_that_is_not_current_is_refused() {
         grant0().verify(&key(GAME), &moved, 2500, &empty()),
         Err(GrantError::WrongKey)
     );
+    // a grant that names a key the player had not used (the current key is older than it)
+    let other_key = ChainHead {
+        key: Identity::from_seed(&[3; 32]).id(),
+        ..head()
+    };
+    assert_eq!(
+        grant0().verify(&key(GAME), &other_key, 2500, &empty()),
+        Err(GrantError::WrongKey)
+    );
     // the same key, but it became current again after the grant was issued
     let again = ChainHead {
         since_ms: 1501,

@@ -14,9 +14,12 @@
 //! [`GrantError::Signature`]; [`GrantError::Chain`] is only for a link that key really
 //! signed but that does not continue the chain.
 //!
-//! This module is not complete yet: it has the id and the key chain, and the grant, its
-//! revocation and their C ABI come later. [`TAG_GRANT_V1`] and [`TAG_REVOCATION_V1`] are
-//! reserved for them; nothing in this version issues or checks a grant.
+//! A game gives a player a [`Grant`] (a scope for a window of time, signed by the game's
+//! key) and may take it back with a [`Revocation`]; [`Grant::verify`] always takes the
+//! verifier's [`RevocationSet`], so a grant is never checked without its revocations. A
+//! window is `issued <= now < expires`: the expiry itself is outside it.
+//!
+//! This module is not complete yet: its C ABI comes later.
 
 use crate::types::{AliceId, AliceSig};
 use crate::verify::verify;
@@ -306,21 +309,53 @@ impl Grant {
     /// [`GrantError::Times`] when `ttl_ms` is 0, [`GrantError::Overflow`] when
     /// `now_ms + ttl_ms` does not fit in `u64`.
     pub fn issue(
-        _game: &Identity,
-        _player: PlayerId,
-        _player_key: AliceId,
-        _scope: u64,
-        _now_ms: u64,
-        _ttl_ms: u64,
-        _nonce: [u8; 16],
+        game: &Identity,
+        player: PlayerId,
+        player_key: AliceId,
+        scope: u64,
+        now_ms: u64,
+        ttl_ms: u64,
+        nonce: [u8; 16],
     ) -> Result<Self, GrantError> {
-        todo!("Grant::issue")
+        if ttl_ms == 0 {
+            return Err(GrantError::Times);
+        }
+        let expires_ms = now_ms.checked_add(ttl_ms).ok_or(GrantError::Overflow)?;
+        let mut grant = Self {
+            player,
+            player_key,
+            game: game.id(),
+            scope,
+            issued_ms: now_ms,
+            expires_ms,
+            nonce,
+            sig: AliceSig([0; 64]),
+        };
+        grant.sig = sign_tagged(game, TAG_GRANT_V1, &grant.body());
+        Ok(grant)
+    }
+
+    /// The signed part of the wire form (everything but the signature).
+    fn body(&self) -> [u8; GRANT_BODY_LEN] {
+        let mut b = [0u8; GRANT_BODY_LEN];
+        b[0] = PLAYER_WIRE_VERSION;
+        b[1..33].copy_from_slice(&self.player.0);
+        b[33..65].copy_from_slice(&self.player_key.0);
+        b[65..97].copy_from_slice(&self.game.0);
+        b[97..105].copy_from_slice(&self.scope.to_le_bytes());
+        b[105..113].copy_from_slice(&self.issued_ms.to_le_bytes());
+        b[113..121].copy_from_slice(&self.expires_ms.to_le_bytes());
+        b[121..137].copy_from_slice(&self.nonce);
+        b
     }
 
     /// The wire form ([`GRANT_LEN`] bytes).
     #[must_use]
     pub fn to_bytes(&self) -> [u8; GRANT_LEN] {
-        todo!("Grant::to_bytes")
+        let mut b = [0u8; GRANT_LEN];
+        b[..GRANT_BODY_LEN].copy_from_slice(&self.body());
+        b[GRANT_BODY_LEN..].copy_from_slice(&self.sig.0);
+        b
     }
 
     /// Read the wire form. The signature is not checked here ([`Grant::verify`] does).
@@ -328,8 +363,21 @@ impl Grant {
     /// # Errors
     /// [`GrantError::Length`] for any other length, [`GrantError::Version`] for another
     /// version byte.
-    pub fn from_bytes(_b: &[u8]) -> Result<Self, GrantError> {
-        todo!("Grant::from_bytes")
+    pub fn from_bytes(b: &[u8]) -> Result<Self, GrantError> {
+        let b: &[u8; GRANT_LEN] = b.try_into().map_err(|_| GrantError::Length)?;
+        if b[0] != PLAYER_WIRE_VERSION {
+            return Err(GrantError::Version);
+        }
+        Ok(Self {
+            player: PlayerId(array(&b[1..33])),
+            player_key: AliceId(array(&b[33..65])),
+            game: AliceId(array(&b[65..97])),
+            scope: u64::from_le_bytes(array(&b[97..105])),
+            issued_ms: u64::from_le_bytes(array(&b[105..113])),
+            expires_ms: u64::from_le_bytes(array(&b[113..121])),
+            nonce: array(&b[121..137]),
+            sig: AliceSig(array(&b[GRANT_BODY_LEN..])),
+        })
     }
 
     /// Check the grant for `expected_game` at `now_ms`, against the player's chain end
@@ -348,12 +396,40 @@ impl Grant {
     #[cfg(feature = "alloc")]
     pub fn verify(
         &self,
-        _expected_game: &AliceId,
-        _head: &ChainHead,
-        _now_ms: u64,
-        _revoked: &RevocationSet,
+        expected_game: &AliceId,
+        head: &ChainHead,
+        now_ms: u64,
+        revoked: &RevocationSet,
     ) -> Result<VerifiedGrant, GrantError> {
-        todo!("Grant::verify")
+        if !verify_tagged(&self.game, TAG_GRANT_V1, &self.body(), &self.sig) {
+            return Err(GrantError::Signature);
+        }
+        if self.game != *expected_game {
+            return Err(GrantError::WrongGame);
+        }
+        if self.issued_ms >= self.expires_ms {
+            return Err(GrantError::Times);
+        }
+        if now_ms < self.issued_ms {
+            return Err(GrantError::NotYetValid);
+        }
+        if expired(now_ms, self.expires_ms) {
+            return Err(GrantError::Expired);
+        }
+        if self.player != head.player
+            || self.player_key != head.key
+            || self.issued_ms < head.since_ms
+        {
+            return Err(GrantError::WrongKey);
+        }
+        if revoked.contains(&self.game, &self.nonce) {
+            return Err(GrantError::Revoked);
+        }
+        Ok(VerifiedGrant {
+            player: self.player,
+            scope: self.scope,
+            expires_ms: self.expires_ms,
+        })
     }
 }
 
@@ -373,14 +449,39 @@ impl Revocation {
     ///
     /// # Errors
     /// [`GrantError::WrongGame`] when `game` did not issue `grant`.
-    pub fn issue(_game: &Identity, _grant: &Grant, _revoked_ms: u64) -> Result<Self, GrantError> {
-        todo!("Revocation::issue")
+    pub fn issue(game: &Identity, grant: &Grant, revoked_ms: u64) -> Result<Self, GrantError> {
+        if grant.game != game.id() {
+            return Err(GrantError::WrongGame);
+        }
+        let mut rev = Self {
+            game: grant.game,
+            nonce: grant.nonce,
+            grant_expires_ms: grant.expires_ms,
+            revoked_ms,
+            sig: AliceSig([0; 64]),
+        };
+        rev.sig = sign_tagged(game, TAG_REVOCATION_V1, &rev.body());
+        Ok(rev)
+    }
+
+    /// The signed part of the wire form (everything but the signature).
+    fn body(&self) -> [u8; REVOCATION_BODY_LEN] {
+        let mut b = [0u8; REVOCATION_BODY_LEN];
+        b[0] = PLAYER_WIRE_VERSION;
+        b[1..33].copy_from_slice(&self.game.0);
+        b[33..49].copy_from_slice(&self.nonce);
+        b[49..57].copy_from_slice(&self.grant_expires_ms.to_le_bytes());
+        b[57..65].copy_from_slice(&self.revoked_ms.to_le_bytes());
+        b
     }
 
     /// The wire form ([`REVOCATION_LEN`] bytes).
     #[must_use]
     pub fn to_bytes(&self) -> [u8; REVOCATION_LEN] {
-        todo!("Revocation::to_bytes")
+        let mut b = [0u8; REVOCATION_LEN];
+        b[..REVOCATION_BODY_LEN].copy_from_slice(&self.body());
+        b[REVOCATION_BODY_LEN..].copy_from_slice(&self.sig.0);
+        b
     }
 
     /// Read the wire form. The signature is not checked here ([`RevocationSet::add`] does).
@@ -388,8 +489,18 @@ impl Revocation {
     /// # Errors
     /// [`GrantError::Length`] for any other length, [`GrantError::Version`] for another
     /// version byte.
-    pub fn from_bytes(_b: &[u8]) -> Result<Self, GrantError> {
-        todo!("Revocation::from_bytes")
+    pub fn from_bytes(b: &[u8]) -> Result<Self, GrantError> {
+        let b: &[u8; REVOCATION_LEN] = b.try_into().map_err(|_| GrantError::Length)?;
+        if b[0] != PLAYER_WIRE_VERSION {
+            return Err(GrantError::Version);
+        }
+        Ok(Self {
+            game: AliceId(array(&b[1..33])),
+            nonce: array(&b[33..49]),
+            grant_expires_ms: u64::from_le_bytes(array(&b[49..57])),
+            revoked_ms: u64::from_le_bytes(array(&b[57..65])),
+            sig: AliceSig(array(&b[REVOCATION_BODY_LEN..])),
+        })
     }
 }
 
@@ -409,8 +520,14 @@ impl RevocationSet {
     ///
     /// # Errors
     /// [`GrantError::Full`] when `capacity` is 0.
-    pub fn new(_capacity: usize) -> Result<Self, GrantError> {
-        todo!("RevocationSet::new")
+    pub fn new(capacity: usize) -> Result<Self, GrantError> {
+        if capacity == 0 {
+            return Err(GrantError::Full);
+        }
+        Ok(Self {
+            entries: alloc::collections::BTreeMap::new(),
+            capacity,
+        })
     }
 
     /// Add a revocation after checking its signature under its game's key. Adding one the
@@ -419,20 +536,34 @@ impl RevocationSet {
     /// # Errors
     /// [`GrantError::Signature`] when the signature does not verify, [`GrantError::Full`]
     /// when the set is full (nothing is stored).
-    pub fn add(&mut self, _rev: &Revocation) -> Result<(), GrantError> {
-        todo!("RevocationSet::add")
+    pub fn add(&mut self, rev: &Revocation) -> Result<(), GrantError> {
+        if !verify_tagged(&rev.game, TAG_REVOCATION_V1, &rev.body(), &rev.sig) {
+            return Err(GrantError::Signature);
+        }
+        let entry = (rev.game.0, rev.nonce);
+        if self.entries.contains_key(&entry) {
+            return Ok(());
+        }
+        if self.entries.len() >= self.capacity {
+            return Err(GrantError::Full);
+        }
+        self.entries.insert(entry, rev.grant_expires_ms);
+        Ok(())
     }
 
     /// Whether the grant `nonce` of `game` is revoked.
     #[must_use]
-    pub fn contains(&self, _game: &AliceId, _nonce: &[u8; 16]) -> bool {
-        todo!("RevocationSet::contains")
+    pub fn contains(&self, game: &AliceId, nonce: &[u8; 16]) -> bool {
+        self.entries.contains_key(&(game.0, *nonce))
     }
 
     /// Drop the revocations whose grant has expired (`grant_expires <= now_ms`); returns
     /// how many were dropped.
-    pub fn purge(&mut self, _now_ms: u64) -> usize {
-        todo!("RevocationSet::purge")
+    pub fn purge(&mut self, now_ms: u64) -> usize {
+        let before = self.entries.len();
+        self.entries
+            .retain(|_, grant_expires_ms| !expired(now_ms, *grant_expires_ms));
+        before - self.entries.len()
     }
 
     #[must_use]
@@ -453,6 +584,19 @@ impl RevocationSet {
 
 /// Length of a [`RotationLink`] without its signature.
 const ROTATION_BODY_LEN: usize = ROTATION_LINK_LEN - 64;
+
+/// Length of a [`Grant`] without its signature.
+const GRANT_BODY_LEN: usize = GRANT_LEN - 64;
+
+/// Length of a [`Revocation`] without its signature.
+const REVOCATION_BODY_LEN: usize = REVOCATION_LEN - 64;
+
+/// Whether a time `now_ms` is past an expiry: the expiry itself is outside the window.
+/// Every expiry check of this module goes through here.
+#[cfg(feature = "alloc")]
+const fn expired(now_ms: u64, expires_ms: u64) -> bool {
+    now_ms >= expires_ms
+}
 
 /// The longest body this module signs (a grant without its signature).
 const MAX_BODY_LEN: usize = 137;
