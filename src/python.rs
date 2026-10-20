@@ -332,15 +332,16 @@ fn endorse(
     target: &PyAliceId,
     now_ms: u64,
     ttl_ms: u64,
-) -> (Vec<u8>, Vec<u8>, Vec<u8>, u64, u64) {
-    let e = crate::endorse(&signer.inner, &target.inner, now_ms, ttl_ms);
-    (
+) -> PyResult<(Vec<u8>, Vec<u8>, Vec<u8>, u64, u64)> {
+    let e = crate::endorse(&signer.inner, &target.inner, now_ms, ttl_ms)
+        .map_err(|_| PyValueError::new_err("now_ms + ttl_ms exceeds u64::MAX"))?;
+    Ok((
         e.endorser.0.to_vec(),
         e.endorsed.0.to_vec(),
         e.sig.0.to_vec(),
         e.issued_ms,
         e.expires_ms,
-    )
+    ))
 }
 
 /// Verify an endorsement. Returns True if valid and not expired.

@@ -1,5 +1,6 @@
 //! trust chain.
 
+use crate::errors::{AuthError, Result};
 use crate::identity::*;
 use crate::types::*;
 use crate::verify::ok;
@@ -45,19 +46,29 @@ impl Endorsement {
 
 /// Create an endorsement: the signer vouches for the target identity.
 ///
-/// The endorsement is valid from `now_ms` until `now_ms + ttl_ms`.
+/// The endorsement is valid from `now_ms` until `now_ms + ttl_ms` inclusive
+/// ([`verify_endorsement`] refuses only when `now_ms > expires_ms`), so
+/// `ttl_ms = 0` gives an endorsement that verifies at `now_ms` and not after.
+///
+/// # Errors
+///
+/// [`AuthError::E6`] when `now_ms + ttl_ms` exceeds `u64::MAX`; nothing is signed.
 #[inline]
-#[must_use]
-pub fn endorse(signer: &Identity, target: &AliceId, now_ms: u64, ttl_ms: u64) -> Endorsement {
-    let expires_ms = now_ms + ttl_ms;
+pub fn endorse(
+    signer: &Identity,
+    target: &AliceId,
+    now_ms: u64,
+    ttl_ms: u64,
+) -> Result<Endorsement> {
+    let expires_ms = now_ms.checked_add(ttl_ms).ok_or(AuthError::E6)?;
     let payload = Endorsement::payload(target, now_ms, expires_ms);
-    Endorsement {
+    Ok(Endorsement {
         endorser: signer.id(),
         endorsed: *target,
         sig: signer.sign(&payload),
         issued_ms: now_ms,
         expires_ms,
-    }
+    })
 }
 
 /// Verify a single endorsement: check signature validity AND expiry.

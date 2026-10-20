@@ -276,7 +276,7 @@ policy.assign(public_key, 0b0011)  # Read + Write
 can_read = policy.check(public_key, 0)
 
 # Trust chain endorsement
-endorsement = aa.endorse(identity, target_id, now_ms, ttl_ms)
+endorsement = aa.endorse(identity, target_id, now_ms, ttl_ms)  # ValueError if now_ms + ttl_ms exceeds u64::MAX
 trusted = aa.verify_endorsement(endorsement, now_ms)
 
 # Auth token
@@ -362,7 +362,7 @@ Endorsement chain verification (root -> intermediate -> leaf) for hierarchical P
 ```rust
 use alice_auth::{endorse, verify_endorsement, verify_chain};
 
-let endorsement = endorse(&root, &child.id(), now_ms, ttl_ms);
+let endorsement = endorse(&root, &child.id(), now_ms, ttl_ms)?; // Err(E6) if now_ms + ttl_ms exceeds u64::MAX
 assert!(verify_endorsement(&endorsement, now_ms));
 assert!(verify_chain(&[endorsement1, endorsement2], &root.id(), now_ms));
 ```

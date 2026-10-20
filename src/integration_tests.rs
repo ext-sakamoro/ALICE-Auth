@@ -374,7 +374,7 @@ fn timed_challenge_wrong_signer() {
 fn endorsement_basic() {
     let root = Identity::gen().unwrap();
     let user = Identity::gen().unwrap();
-    let e = endorse(&root, &user.id(), 1000, 60_000);
+    let e = endorse(&root, &user.id(), 1000, 60_000).unwrap();
     assert!(verify_endorsement(&e, 2000));
     assert_eq!(e.endorser, root.id());
     assert_eq!(e.endorsed, user.id());
@@ -386,7 +386,7 @@ fn endorsement_basic() {
 fn endorsement_tampered() {
     let root = Identity::gen().unwrap();
     let user = Identity::gen().unwrap();
-    let mut e = endorse(&root, &user.id(), 1000, 60_000);
+    let mut e = endorse(&root, &user.id(), 1000, 60_000).unwrap();
     // Tamper with the endorsed identity
     e.endorsed = AliceId::new([0xFF; 32]);
     assert!(!verify_endorsement(&e, 2000));
@@ -397,7 +397,7 @@ fn endorsement_wrong_signer() {
     let root = Identity::gen().unwrap();
     let fake = Identity::gen().unwrap();
     let user = Identity::gen().unwrap();
-    let mut e = endorse(&root, &user.id(), 1000, 60_000);
+    let mut e = endorse(&root, &user.id(), 1000, 60_000).unwrap();
     e.endorser = fake.id();
     assert!(!verify_endorsement(&e, 2000));
 }
@@ -406,7 +406,7 @@ fn endorsement_wrong_signer() {
 fn endorsement_expired() {
     let root = Identity::gen().unwrap();
     let user = Identity::gen().unwrap();
-    let e = endorse(&root, &user.id(), 1000, 5000);
+    let e = endorse(&root, &user.id(), 1000, 5000).unwrap();
     // Valid before expiry
     assert!(verify_endorsement(&e, 5000));
     // Expired after expiry
@@ -417,7 +417,7 @@ fn endorsement_expired() {
 fn verify_chain_single() {
     let root = Identity::gen().unwrap();
     let user = Identity::gen().unwrap();
-    let e = endorse(&root, &user.id(), 1000, 60_000);
+    let e = endorse(&root, &user.id(), 1000, 60_000).unwrap();
     assert!(verify_chain(&[e], &root.id(), 2000));
 }
 
@@ -426,8 +426,8 @@ fn verify_chain_multi_hop() {
     let root = Identity::gen().unwrap();
     let intermediate = Identity::gen().unwrap();
     let leaf = Identity::gen().unwrap();
-    let e1 = endorse(&root, &intermediate.id(), 1000, 60_000);
-    let e2 = endorse(&intermediate, &leaf.id(), 2000, 60_000);
+    let e1 = endorse(&root, &intermediate.id(), 1000, 60_000).unwrap();
+    let e2 = endorse(&intermediate, &leaf.id(), 2000, 60_000).unwrap();
     assert!(verify_chain(&[e1, e2], &root.id(), 3000));
 }
 
@@ -436,7 +436,7 @@ fn verify_chain_wrong_root() {
     let root = Identity::gen().unwrap();
     let fake_root = Identity::gen().unwrap();
     let user = Identity::gen().unwrap();
-    let e = endorse(&root, &user.id(), 1000, 60_000);
+    let e = endorse(&root, &user.id(), 1000, 60_000).unwrap();
     assert!(!verify_chain(&[e], &fake_root.id(), 2000));
 }
 
@@ -446,8 +446,8 @@ fn verify_chain_broken_link() {
     let a = Identity::gen().unwrap();
     let b = Identity::gen().unwrap();
     let unrelated = Identity::gen().unwrap();
-    let e1 = endorse(&root, &a.id(), 1000, 60_000);
-    let e2 = endorse(&unrelated, &b.id(), 2000, 60_000);
+    let e1 = endorse(&root, &a.id(), 1000, 60_000).unwrap();
+    let e2 = endorse(&unrelated, &b.id(), 2000, 60_000).unwrap();
     assert!(!verify_chain(&[e1, e2], &root.id(), 3000));
 }
 
@@ -462,8 +462,8 @@ fn verify_chain_expired_link() {
     let root = Identity::gen().unwrap();
     let intermediate = Identity::gen().unwrap();
     let leaf = Identity::gen().unwrap();
-    let e1 = endorse(&root, &intermediate.id(), 1000, 5000); // expires at 6000
-    let e2 = endorse(&intermediate, &leaf.id(), 2000, 60_000);
+    let e1 = endorse(&root, &intermediate.id(), 1000, 5000).unwrap(); // expires at 6000
+    let e2 = endorse(&intermediate, &leaf.id(), 2000, 60_000).unwrap();
     // At 3000: both valid
     assert!(verify_chain(&[e1, e2], &root.id(), 3000));
     // At 7000: e1 expired → chain fails
