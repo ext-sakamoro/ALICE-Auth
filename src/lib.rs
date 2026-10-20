@@ -60,6 +60,7 @@ pub mod identity;
 /// Key rotation (`Vec` of previous generations、`std` 専用)
 #[cfg(feature = "std")]
 pub mod key_rotation;
+pub mod player;
 pub mod prelude;
 pub mod protocol;
 pub mod random;
@@ -108,6 +109,7 @@ pub use crate::errors::*;
 pub use crate::identity::*;
 #[cfg(feature = "std")]
 pub use crate::key_rotation::*;
+pub use crate::player::*;
 pub use crate::protocol::*;
 pub use crate::random::*;
 pub use crate::social_recovery::*;

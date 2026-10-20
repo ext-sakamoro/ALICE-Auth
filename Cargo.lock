@@ -22,6 +22,7 @@ dependencies = [
  "getrandom",
  "pyo3",
  "serde",
+ "sha2",
  "subtle",
  "zeroize",
 ]

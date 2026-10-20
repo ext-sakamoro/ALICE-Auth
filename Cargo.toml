@@ -34,6 +34,7 @@ api = ["std"]  # ALICE-API auth middleware bridge
 [dependencies]
 ed25519-dalek = { version = "2.1", default-features = false, features = ["hazmat", "zeroize"] }
 getrandom = { version = "0.2", default-features = false }
+sha2 = { version = "0.10", default-features = false }
 subtle = { version = "2", default-features = false }
 zeroize = { version = "1", default-features = false, features = ["derive"] }
 serde = { version = "1.0", default-features = false, features = ["derive"], optional = true }
