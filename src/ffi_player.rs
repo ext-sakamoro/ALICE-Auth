@@ -2,10 +2,11 @@
 //!
 //! Every function returns `AA_PLAYER_OK` (0) or the negative code of
 //! [`GrantError::code`], sets `aa_last_error` on a refusal, and writes its outputs only on
-//! success. A null argument is [`GrantError::Null`]. A length argument is checked against
-//! the wire length (or, for rotation links, against the largest slice that can exist)
-//! before the buffer is read, so a wrong length is [`GrantError::Length`], never a read
-//! past the buffer.
+//! success. A null argument is [`GrantError::Null`]. A grant or revocation length other than
+//! its wire length is [`GrantError::Length`] before the buffer is read. For rotation links,
+//! a count whose byte length no buffer could have (past `isize::MAX`) is
+//! [`GrantError::Length`]; a count that is possible but larger than the buffer the caller
+//! passed is the caller's responsibility (reading past that buffer is undefined behavior).
 //! Wire forms are passed as byte buffers of the lengths below.
 
 use super::ffi::{guard, Handle};
