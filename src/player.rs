@@ -267,6 +267,190 @@ pub fn resolve_chain(genesis: &AliceId, links: &[RotationLink]) -> Result<ChainH
     })
 }
 
+/// Length of a [`Grant`] on the wire.
+pub const GRANT_LEN: usize = 201;
+
+/// Length of a [`Revocation`] on the wire.
+pub const REVOCATION_LEN: usize = 129;
+
+/// A game's grant to a player: the scope it allows, under the player's key at the time,
+/// for `issued_ms <= now < expires_ms`. Signed by the game's key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Grant {
+    pub player: PlayerId,
+    /// The player's key when the grant was issued; it must still be current.
+    pub player_key: AliceId,
+    /// The issuing game's key.
+    pub game: AliceId,
+    /// What the grant allows; the game defines its meaning.
+    pub scope: u64,
+    pub issued_ms: u64,
+    pub expires_ms: u64,
+    /// Chosen by the game, unique among its grants (a revocation names it).
+    pub nonce: [u8; 16],
+    pub sig: AliceSig,
+}
+
+/// What a grant that passed [`Grant::verify`] allows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VerifiedGrant {
+    pub player: PlayerId,
+    pub scope: u64,
+    pub expires_ms: u64,
+}
+
+impl Grant {
+    /// Sign a grant valid from `now_ms` for `ttl_ms`.
+    ///
+    /// # Errors
+    /// [`GrantError::Times`] when `ttl_ms` is 0, [`GrantError::Overflow`] when
+    /// `now_ms + ttl_ms` does not fit in `u64`.
+    pub fn issue(
+        _game: &Identity,
+        _player: PlayerId,
+        _player_key: AliceId,
+        _scope: u64,
+        _now_ms: u64,
+        _ttl_ms: u64,
+        _nonce: [u8; 16],
+    ) -> Result<Self, GrantError> {
+        todo!("Grant::issue")
+    }
+
+    /// The wire form ([`GRANT_LEN`] bytes).
+    #[must_use]
+    pub fn to_bytes(&self) -> [u8; GRANT_LEN] {
+        todo!("Grant::to_bytes")
+    }
+
+    /// Read the wire form. The signature is not checked here ([`Grant::verify`] does).
+    ///
+    /// # Errors
+    /// [`GrantError::Length`] for any other length, [`GrantError::Version`] for another
+    /// version byte.
+    pub fn from_bytes(_b: &[u8]) -> Result<Self, GrantError> {
+        todo!("Grant::from_bytes")
+    }
+
+    /// Check the grant for `expected_game` at `now_ms`, against the player's chain end
+    /// `head` and the revocations in `revoked`.
+    ///
+    /// The checks run in a fixed order and the first that fails is returned: the
+    /// signature under the grant's game key ([`GrantError::Signature`]), the game
+    /// ([`GrantError::WrongGame`]), the window ([`GrantError::Times`],
+    /// [`GrantError::NotYetValid`], [`GrantError::Expired`] for `now >= expires`), the key
+    /// ([`GrantError::WrongKey`]: another player, a key that is not current, or a key that
+    /// became current after the grant was issued) and last the revocation
+    /// ([`GrantError::Revoked`]).
+    ///
+    /// # Errors
+    /// The first check that fails, as above.
+    #[cfg(feature = "alloc")]
+    pub fn verify(
+        &self,
+        _expected_game: &AliceId,
+        _head: &ChainHead,
+        _now_ms: u64,
+        _revoked: &RevocationSet,
+    ) -> Result<VerifiedGrant, GrantError> {
+        todo!("Grant::verify")
+    }
+}
+
+/// A game's revocation of one of its grants, named by the grant's nonce. It carries the
+/// grant's expiry so a [`RevocationSet`] can drop it once the grant has expired anyway.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Revocation {
+    pub game: AliceId,
+    pub nonce: [u8; 16],
+    pub grant_expires_ms: u64,
+    pub revoked_ms: u64,
+    pub sig: AliceSig,
+}
+
+impl Revocation {
+    /// Sign the revocation of `grant` at `revoked_ms`.
+    ///
+    /// # Errors
+    /// [`GrantError::WrongGame`] when `game` did not issue `grant`.
+    pub fn issue(_game: &Identity, _grant: &Grant, _revoked_ms: u64) -> Result<Self, GrantError> {
+        todo!("Revocation::issue")
+    }
+
+    /// The wire form ([`REVOCATION_LEN`] bytes).
+    #[must_use]
+    pub fn to_bytes(&self) -> [u8; REVOCATION_LEN] {
+        todo!("Revocation::to_bytes")
+    }
+
+    /// Read the wire form. The signature is not checked here ([`RevocationSet::add`] does).
+    ///
+    /// # Errors
+    /// [`GrantError::Length`] for any other length, [`GrantError::Version`] for another
+    /// version byte.
+    pub fn from_bytes(_b: &[u8]) -> Result<Self, GrantError> {
+        todo!("Revocation::from_bytes")
+    }
+}
+
+/// The revocations a verifier knows, with a fixed capacity. A full set refuses a new
+/// revocation and keeps every one it holds; entries leave only by [`RevocationSet::purge`],
+/// once the revoked grant has expired.
+#[cfg(feature = "alloc")]
+#[derive(Clone, Debug)]
+pub struct RevocationSet {
+    entries: alloc::collections::BTreeMap<([u8; 32], [u8; 16]), u64>,
+    capacity: usize,
+}
+
+#[cfg(feature = "alloc")]
+impl RevocationSet {
+    /// An empty set that holds at most `capacity` revocations.
+    ///
+    /// # Errors
+    /// [`GrantError::Full`] when `capacity` is 0.
+    pub fn new(_capacity: usize) -> Result<Self, GrantError> {
+        todo!("RevocationSet::new")
+    }
+
+    /// Add a revocation after checking its signature under its game's key. Adding one the
+    /// set already holds succeeds and keeps the first.
+    ///
+    /// # Errors
+    /// [`GrantError::Signature`] when the signature does not verify, [`GrantError::Full`]
+    /// when the set is full (nothing is stored).
+    pub fn add(&mut self, _rev: &Revocation) -> Result<(), GrantError> {
+        todo!("RevocationSet::add")
+    }
+
+    /// Whether the grant `nonce` of `game` is revoked.
+    #[must_use]
+    pub fn contains(&self, _game: &AliceId, _nonce: &[u8; 16]) -> bool {
+        todo!("RevocationSet::contains")
+    }
+
+    /// Drop the revocations whose grant has expired (`grant_expires <= now_ms`); returns
+    /// how many were dropped.
+    pub fn purge(&mut self, _now_ms: u64) -> usize {
+        todo!("RevocationSet::purge")
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    #[must_use]
+    pub const fn capacity(&self) -> usize {
+        self.capacity
+    }
+}
+
 /// Length of a [`RotationLink`] without its signature.
 const ROTATION_BODY_LEN: usize = ROTATION_LINK_LEN - 64;
 
