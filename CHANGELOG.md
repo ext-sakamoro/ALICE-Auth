@@ -5,6 +5,7 @@ All notable changes to ALICE-Auth will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- CI: 公開する text の検査 (`.github/workflows/public-text.yml`、`scripts/public_text.sh`) を足した ALICE-Law の `scripts/public_text_check.py` を `.github/public-text-pin` の revision で取り、SHA-256 を照らしてから、HEAD の全 file (path と本文) と push した commit (message・追加行・path) を検査する 比較 0 件と読めない pin / base は失敗 試験 `scripts/test_public_text.py` (読めない pin と base、置いた note link が検出されること、置かない tree が 0 件で通ること) `scripts/preflight.sh` でも走る
 - **License: `AGPL-3.0-or-later` → `AGPL-3.0-or-later OR LicenseRef-Commercial` (dual-licensed、2026-09-27)** AGPL 側の条件は変更なし (既存 AGPL 利用者への影響ゼロ)、商用という選択肢が追加されただけ SPDX が AGPL 単独だと cargo-deny / FOSSA / SBOM に「商用オプションなし」と見えるため宣言を dual に 変更点: SPDX / `LICENSE` → `LICENSE-AGPL` / `LICENSE-COMMERCIAL.md` (商用トリガー 6 条件 = クローズド製品・商用 SaaS・エッジ / ファームウェア配布・plugin 再配布・プラットフォーム NDA・保証、社内利用は AGPL 側で無償と明記) / README の選択肢表 商用窓口は法人 `contact@extoria.co.jp`
 - 依存: optional の `alice-crypto` (feature `crypto` / `nizk`) の要求を `0.1` から `0.4` に上げた 以前の要求は公開中の 0.4.1 を受け取れなかった 0.4.1 で `crypto` / `nizk` / `pyo3` を build し、`crypto` / `nizk` を含む feature で試験が通ることを確かめた
 
