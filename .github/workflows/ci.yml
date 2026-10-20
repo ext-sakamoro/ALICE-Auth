@@ -1,9 +1,8 @@
 name: CI
 
-# canonical CI template: [[reference_alice_ci_canonical_template]] 手順 4.5 / 4.6
 # 2026-09-15 強化 (それまで fmt + actionlint のみで test / clippy / doc は CI 未実行、crates.io 公開 crate):
 # - test / clippy (pedantic 0 件なので `-D warnings` gate) / doc を default + full native feature set で
-# - msrv job: `rust-version = "1.88"` (slice::as_chunks) を `cargo +1.88 check` で実 compile (罠 #27)
+# - msrv job: `rust-version = "1.88"` (slice::as_chunks) を `cargo +1.88 check` で実 compile
 # - no_std job: host (no alloc / alloc) + bare-metal thumbv7em (getrandom 非対応 target なので `custom-rng`
 #   = getrandom/custom 込み、rust-toolchain.toml の `targets` で pinned toolchain 側に install)
 #   library の `#[panic_handler]` は 2026-09-15 に削除 (最終 binary が提供する、library が持つと link 不能)
