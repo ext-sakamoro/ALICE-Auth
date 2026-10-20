@@ -127,12 +127,14 @@ impl JwtClaims {
     }
 
     /// 発行時刻を設定して有効期限を計算。
-    #[must_use]
-    pub const fn with_iat(mut self, iat: u64) -> Self {
+    ///
+    /// # Errors
+    /// `iat + ttl` が `u64::MAX` を超える時は `AuthError::E6`
+    pub fn with_iat(mut self, iat: u64) -> crate::Result<Self> {
         let ttl = self.exp; // new() で ttl として格納
+        self.exp = iat.checked_add(ttl).ok_or(crate::AuthError::E6)?;
         self.iat = iat;
-        self.exp = iat + ttl;
-        self
+        Ok(self)
     }
 
     /// 有効期限チェック。
@@ -272,7 +274,9 @@ mod tests {
     #[test]
     fn jwt_create_and_verify() {
         let id = Identity::gen().unwrap();
-        let claims = JwtClaims::new("alice", "user-42", 3600).with_iat(1000);
+        let claims = JwtClaims::new("alice", "user-42", 3600)
+            .with_iat(1000)
+            .unwrap();
 
         let token = create_jwt(&id, &claims);
 
@@ -325,7 +329,7 @@ mod tests {
 
     #[test]
     fn claims_is_expired() {
-        let claims = JwtClaims::new("a", "b", 100).with_iat(1000);
+        let claims = JwtClaims::new("a", "b", 100).with_iat(1000).unwrap();
         assert!(!claims.is_expired(1050));
         assert!(claims.is_expired(1100));
         assert!(claims.is_expired(2000));

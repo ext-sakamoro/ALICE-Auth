@@ -43,7 +43,8 @@ extern "C"
     void  aa_rotating_free(void* h);
 
     // --- AuthToken ---
-    void  aa_token_create(uint64_t now_ms, uint64_t ttl_ms, uint8_t* o);
+    // 0 = written, -1 = null output, -2 = now_ms + ttl_ms exceeds u64::MAX (o untouched)
+    int32_t aa_token_create(uint64_t now_ms, uint64_t ttl_ms, uint8_t* o);
     int32_t aa_token_is_expired(const uint8_t* data, uint64_t now_ms);
 
     // --- RevocationList ---
@@ -238,10 +239,11 @@ public:
 /// Structured authentication token (17 bytes).
 struct FAliceAuthToken
 {
-    /// Create a token. Writes 17 bytes to OutToken.
-    static void Create(uint64_t NowMs, uint64_t TtlMs, uint8_t OutToken[17])
+    /// Create a token. Writes 17 bytes to OutToken and returns true; returns false
+    /// (OutToken untouched) when NowMs + TtlMs exceeds u64::MAX.
+    [[nodiscard]] static bool Create(uint64_t NowMs, uint64_t TtlMs, uint8_t OutToken[17])
     {
-        aa_token_create(NowMs, TtlMs, OutToken);
+        return aa_token_create(NowMs, TtlMs, OutToken) == 0;
     }
 
     /// Check if a token is expired.

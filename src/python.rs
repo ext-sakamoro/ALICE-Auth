@@ -451,10 +451,10 @@ impl PyRotatingIdentity {
 
 /// Create an auth token. Returns 17 bytes.
 #[pyfunction]
-fn token_create(now_ms: u64, ttl_ms: u64) -> Vec<u8> {
+fn token_create(now_ms: u64, ttl_ms: u64) -> PyResult<Vec<u8>> {
     crate::api_bridge::AuthToken::new(now_ms, ttl_ms)
-        .to_bytes()
-        .to_vec()
+        .map(|t| t.to_bytes().to_vec())
+        .map_err(|_| PyValueError::new_err("now_ms + ttl_ms exceeds u64::MAX"))
 }
 
 /// Parse an auth token. Returns (version, expires_ms, nonce_ms) or None.

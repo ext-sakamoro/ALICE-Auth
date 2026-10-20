@@ -590,32 +590,32 @@ mod api_tests {
 
     #[test]
     fn auth_token_not_expired_at_creation() {
-        let token = AuthToken::new(1000, 60_000);
+        let token = AuthToken::new(1000, 60_000).unwrap();
         assert!(!token.is_expired(1000));
     }
 
     #[test]
     fn auth_token_not_expired_one_before_boundary() {
-        let token = AuthToken::new(0, 5000);
+        let token = AuthToken::new(0, 5000).unwrap();
         assert!(!token.is_expired(5000)); // expires_ms == 5000, now==5000 → not > → not expired
     }
 
     #[test]
     fn auth_token_expired_one_past_boundary() {
-        let token = AuthToken::new(0, 5000);
+        let token = AuthToken::new(0, 5000).unwrap();
         assert!(token.is_expired(5001));
     }
 
     #[test]
     fn auth_token_from_bytes_wrong_version_is_none() {
-        let mut bytes = AuthToken::new(0, 1000).to_bytes();
+        let mut bytes = AuthToken::new(0, 1000).unwrap().to_bytes();
         bytes[0] = 0; // version 0 is invalid
         assert!(AuthToken::from_bytes(&bytes).is_none());
     }
 
     #[test]
     fn auth_token_from_bytes_exact_size_parses() {
-        let token = AuthToken::new(12345, 99999);
+        let token = AuthToken::new(12345, 99999).unwrap();
         let bytes = token.to_bytes();
         assert_eq!(bytes.len(), AuthToken::SIZE);
         let restored = AuthToken::from_bytes(&bytes).unwrap();
@@ -718,7 +718,7 @@ mod api_tests {
     #[test]
     fn middleware_denied_count_accumulates() {
         let i = Identity::gen().unwrap();
-        let token = AuthMiddleware::create_auth_token(1000, 60_000);
+        let token = AuthMiddleware::create_auth_token(1000, 60_000).unwrap();
         let bad_sig = alice_auth::AliceSig::new([0u8; 64]);
         let req = AuthRequest {
             token,
@@ -735,7 +735,7 @@ mod api_tests {
     #[test]
     fn middleware_verified_count_accumulates() {
         let i = Identity::gen().unwrap();
-        let token = AuthMiddleware::create_auth_token(1000, 60_000);
+        let token = AuthMiddleware::create_auth_token(1000, 60_000).unwrap();
         let sig = i.sign(&token);
         let req = AuthRequest {
             token,
@@ -752,7 +752,7 @@ mod api_tests {
     #[test]
     fn middleware_authorized_response_contains_correct_identity() {
         let i = Identity::gen().unwrap();
-        let token = AuthMiddleware::create_auth_token(5000, 60_000);
+        let token = AuthMiddleware::create_auth_token(5000, 60_000).unwrap();
         let sig = i.sign(&token);
         let req = AuthRequest {
             token,

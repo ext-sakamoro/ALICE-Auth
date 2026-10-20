@@ -316,21 +316,35 @@ pub unsafe extern "C" fn aa_rotating_free(h: *mut RotHandle) {
 // ========================================================================
 /// Create an AuthToken. Writes 17 bytes to `out`.
 ///
+/// Returns [`AA_TOKEN_OK`], [`AA_TOKEN_ERR_NULL`] for a null `out` or
+/// [`AA_TOKEN_ERR_OVERFLOW`] when `now_ms + ttl_ms` exceeds `u64::MAX`. On an
+/// error `out` is not written and `aa_last_error` describes it.
+///
 /// # Safety
 ///
 /// - `out` must point to at least 17 writable bytes.
 #[no_mangle]
-pub unsafe extern "C" fn aa_token_create(now_ms: u64, ttl_ms: u64, out: *mut u8) {
-    ffi_guard((), || {
+pub unsafe extern "C" fn aa_token_create(now_ms: u64, ttl_ms: u64, out: *mut u8) -> i32 {
+    ffi_guard(AA_TOKEN_ERR_NULL, || {
         if out.is_null() {
-            null_ptr();
-            return;
+            guard::set_last_error("aa_token_create: null output");
+            return AA_TOKEN_ERR_NULL;
         }
-        let token = crate::api_bridge::AuthToken::new(now_ms, ttl_ms);
+        let Ok(token) = crate::api_bridge::AuthToken::new(now_ms, ttl_ms) else {
+            guard::set_last_error("aa_token_create: now_ms + ttl_ms exceeds u64::MAX");
+            return AA_TOKEN_ERR_OVERFLOW;
+        };
         let bytes = token.to_bytes();
         core::ptr::copy_nonoverlapping(bytes.as_ptr(), out, 17);
-    });
+        AA_TOKEN_OK
+    })
 }
+/// `aa_token_create`: the token was written.
+pub const AA_TOKEN_OK: i32 = 0;
+/// `aa_token_create`: a null `out` (or the call panicked).
+pub const AA_TOKEN_ERR_NULL: i32 = -1;
+/// `aa_token_create`: `now_ms + ttl_ms` exceeds `u64::MAX`.
+pub const AA_TOKEN_ERR_OVERFLOW: i32 = -2;
 /// Check if a token is expired. Returns 1 if expired, 0 if valid.
 ///
 /// # Safety
