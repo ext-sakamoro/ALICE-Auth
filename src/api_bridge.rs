@@ -323,12 +323,143 @@ impl PolicyEngine {
 // Rate Limiting (with distributed state export/import)
 // ============================================================================
 
-/// Serializable rate limit state for distributed coordination
+/// Serializable rate limit state for distributed coordination: `count`
+/// requests of `identity` seen since `window_start_ms`, which matter to the
+/// limit until `expires_ms` (the moment the last of them leaves its window).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RateLimitState {
     pub identity: [u8; 32],
     pub count: u32,
     pub window_start_ms: u64,
+    pub expires_ms: u64,
+}
+
+/// The identifier of a node that reports rate limit state.
+pub type NodeId = [u8; 32];
+
+/// Why rate limit state from another node was not taken as given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RateSyncError {
+    /// The reported count is above the configured `max_remote_count`.
+    OverCap { count: u32, cap: u32 },
+    /// The identity already has reports from `max_remote_nodes` other nodes.
+    TooManyNodes { cap: usize },
+    /// A sum of counts would exceed `u32::MAX`.
+    Overflow,
+    /// The states to merge are for different identities.
+    MixedIdentity,
+    /// There are no states to merge.
+    Empty,
+    /// A configuration bound is zero or above its limit.
+    InvalidConfig,
+}
+
+/// Bounds on what other nodes can make the limiter store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RateSyncConfig {
+    remote_count: u32,
+    remote_nodes: usize,
+    report_ttl_ms: u64,
+}
+
+impl RateSyncConfig {
+    /// The largest accepted `max_remote_count`.
+    pub const MAX_REMOTE_COUNT: u32 = 1_000_000;
+    /// The largest accepted `max_remote_nodes`.
+    pub const MAX_REMOTE_NODES: usize = 4_096;
+    /// The largest accepted `max_report_ttl_ms` (one day).
+    pub const MAX_REPORT_TTL_MS: u64 = 86_400_000;
+
+    /// A configuration accepting at most `max_remote_count` requests per report,
+    /// reports from at most `max_remote_nodes` nodes per identity, and counting a
+    /// report (or holding an identity for a refused one) for at most
+    /// `max_report_ttl_ms` after it is received, whatever `expires_ms` it carries.
+    ///
+    /// # Errors
+    ///
+    /// [`RateSyncError::InvalidConfig`] when a bound is 0 or above its limit.
+    pub const fn new(
+        max_remote_count: u32,
+        max_remote_nodes: usize,
+        max_report_ttl_ms: u64,
+    ) -> Result<Self, RateSyncError> {
+        if max_remote_count == 0
+            || max_remote_count > Self::MAX_REMOTE_COUNT
+            || max_remote_nodes == 0
+            || max_remote_nodes > Self::MAX_REMOTE_NODES
+            || max_report_ttl_ms == 0
+            || max_report_ttl_ms > Self::MAX_REPORT_TTL_MS
+        {
+            return Err(RateSyncError::InvalidConfig);
+        }
+        Ok(Self {
+            remote_count: max_remote_count,
+            remote_nodes: max_remote_nodes,
+            report_ttl_ms: max_report_ttl_ms,
+        })
+    }
+
+    #[must_use]
+    pub const fn max_report_ttl_ms(&self) -> u64 {
+        self.report_ttl_ms
+    }
+
+    #[must_use]
+    pub const fn max_remote_count(&self) -> u32 {
+        self.remote_count
+    }
+
+    #[must_use]
+    pub const fn max_remote_nodes(&self) -> usize {
+        self.remote_nodes
+    }
+}
+
+impl Default for RateSyncConfig {
+    /// 10,000 requests per report, 64 reporting nodes per identity, a report
+    /// counted for at most 10 minutes after it is received.
+    fn default() -> Self {
+        Self {
+            remote_count: 10_000,
+            remote_nodes: 64,
+            report_ttl_ms: 600_000,
+        }
+    }
+}
+
+/// A request count as u32, saturating (a count past `u32::MAX` reads as over any limit).
+fn count_u32(n: usize) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
+}
+
+/// What other nodes reported for one identity.
+#[derive(Debug, Default)]
+struct RemoteLoad {
+    /// node -> (count, expires_ms)
+    nodes: HashMap<NodeId, (u32, u64)>,
+    /// Over the limit until this moment (a refused report), fail-closed.
+    held_until_ms: u64,
+}
+
+impl RemoteLoad {
+    /// Drop the reports whose counted requests no longer matter at `now_ms`.
+    fn prune(&mut self, now_ms: u64) {
+        self.nodes
+            .retain(|_, &mut (_, expires_ms)| now_ms < expires_ms);
+    }
+
+    /// The reported requests that still matter at `now_ms`, or `None` when the
+    /// identity is held over its limit or the sum would overflow.
+    fn count(&self, now_ms: u64) -> Option<u32> {
+        if now_ms < self.held_until_ms {
+            return None;
+        }
+        self.nodes
+            .values()
+            .filter(|&&(_, expires_ms)| now_ms < expires_ms)
+            .try_fold(0u32, |sum, &(count, _)| sum.checked_add(count))
+    }
 }
 
 // ============================================================================
@@ -340,6 +471,8 @@ pub struct RateLimitState {
 /// Uses `HashMap<[u8; 32], Vec<u64>>` for O(1) rate limit lookup per identity.
 pub struct AuthMiddleware {
     rate_limits: HashMap<[u8; 32], Vec<u64>>,
+    remote: HashMap<[u8; 32], RemoteLoad>,
+    rate_sync: RateSyncConfig,
     pub revocation: RevocationList,
     pub verified_count: u64,
     pub denied_count: u64,
@@ -353,8 +486,16 @@ impl Default for AuthMiddleware {
 
 impl AuthMiddleware {
     pub fn new() -> Self {
+        Self::with_rate_sync(RateSyncConfig::default())
+    }
+
+    /// A middleware whose rate limiter accepts other nodes' state within `rate_sync`.
+    #[must_use]
+    pub fn with_rate_sync(rate_sync: RateSyncConfig) -> Self {
         Self {
             rate_limits: HashMap::new(),
+            remote: HashMap::new(),
+            rate_sync,
             revocation: RevocationList::new(),
             verified_count: 0,
             denied_count: 0,
@@ -433,8 +574,11 @@ impl AuthMiddleware {
         AuthToken::new(now_ms, ttl_ms).map(|t| t.to_bytes().to_vec())
     }
 
-    /// Sliding window rate limiter.
-    /// Uses `HashMap` for O(1) identity lookup.
+    /// Sliding window rate limiter: admits a request of `identity` at `now_ms`
+    /// when its local requests in the last `window_ms` plus the requests other
+    /// nodes reported that still matter are below `max_requests`. An identity
+    /// held over its limit by a refused report, or whose reported total would
+    /// overflow, is not admitted.
     pub fn validate_rate_limit(
         &mut self,
         identity: &[u8; 32],
@@ -443,17 +587,27 @@ impl AuthMiddleware {
         max_requests: u32,
     ) -> bool {
         let cutoff = now_ms.saturating_sub(window_ms);
-
+        let remote = match self.remote.get_mut(identity) {
+            Some(load) => {
+                load.prune(now_ms);
+                load.count(now_ms)
+            }
+            None => Some(0),
+        };
         let timestamps = self.rate_limits.entry(*identity).or_default();
         timestamps.retain(|&t| t >= cutoff);
-        if timestamps.len() as u32 >= max_requests {
-            return false;
+        let local = count_u32(timestamps.len());
+        match remote.and_then(|r| r.checked_add(local)) {
+            Some(total) if total < max_requests => {
+                timestamps.push(now_ms);
+                true
+            }
+            _ => false,
         }
-        timestamps.push(now_ms);
-        true
     }
 
-    /// Export rate limit state for a given identity (for distributed sync)
+    /// Export this node's own requests of `identity` in the last `window_ms`
+    /// (reports received from other nodes are not re-exported).
     pub fn export_rate_state(
         &self,
         identity: &[u8; 32],
@@ -462,37 +616,87 @@ impl AuthMiddleware {
     ) -> Option<RateLimitState> {
         let cutoff = now_ms.saturating_sub(window_ms);
         self.rate_limits.get(identity).map(|timestamps| {
-            let count = timestamps.iter().filter(|&&t| t >= cutoff).count() as u32;
+            let count = timestamps.iter().filter(|&&t| t >= cutoff).count();
             RateLimitState {
                 identity: *identity,
-                count,
+                count: count_u32(count),
                 window_start_ms: cutoff,
+                expires_ms: now_ms.saturating_add(window_ms),
             }
         })
     }
 
-    /// Import rate limit state from another node
-    pub fn import_rate_state(&mut self, state: &RateLimitState) {
-        let timestamps = self.rate_limits.entry(state.identity).or_default();
-        for i in 0..state.count {
-            timestamps.push(state.window_start_ms + i as u64);
+    /// Take `node`'s report of `state.identity`, replacing that node's earlier
+    /// report (a replay is not added twice). A report counts until its
+    /// `expires_ms`, but never beyond `now_ms + max_report_ttl_ms`; one that has
+    /// already expired at `now_ms` is ignored.
+    ///
+    /// # Errors
+    ///
+    /// [`RateSyncError::OverCap`] when the count is above `max_remote_count`, or
+    /// [`RateSyncError::TooManyNodes`] when the identity already has reports
+    /// from `max_remote_nodes` other nodes. Nothing is stored, no earlier report
+    /// is dropped, and the identity is held over its limit until the refused
+    /// report's `expires_ms`, bounded the same way (fail-closed: refused load is
+    /// not forgotten, but cannot hold the identity indefinitely).
+    pub fn import_rate_state(
+        &mut self,
+        node: &NodeId,
+        state: &RateLimitState,
+        now_ms: u64,
+    ) -> Result<(), RateSyncError> {
+        // the receiver bounds how long any report can count: a report cannot
+        // lock an identity beyond now + max_report_ttl_ms
+        let expires_ms = state
+            .expires_ms
+            .min(now_ms.saturating_add(self.rate_sync.report_ttl_ms));
+        if now_ms >= expires_ms {
+            return Ok(());
         }
+        let cap = self.rate_sync.remote_count;
+        let max_nodes = self.rate_sync.remote_nodes;
+        let load = self.remote.entry(state.identity).or_default();
+        load.prune(now_ms);
+        let refusal = if state.count > cap {
+            Some(RateSyncError::OverCap {
+                count: state.count,
+                cap,
+            })
+        } else if !load.nodes.contains_key(node) && load.nodes.len() >= max_nodes {
+            Some(RateSyncError::TooManyNodes { cap: max_nodes })
+        } else {
+            None
+        };
+        if let Some(e) = refusal {
+            load.held_until_ms = load.held_until_ms.max(expires_ms);
+            return Err(e);
+        }
+        load.nodes.insert(*node, (state.count, expires_ms));
+        Ok(())
     }
 
-    /// Merge multiple rate limit states from distributed nodes.
-    /// Returns the combined state (sum of counts, earliest window start).
-    pub fn merge_rate_states(states: &[RateLimitState]) -> Option<RateLimitState> {
-        if states.is_empty() {
-            return None;
+    /// Merge rate limit states of one identity from several nodes: the sum of
+    /// the counts, the earliest window start and the latest expiry.
+    ///
+    /// # Errors
+    ///
+    /// [`RateSyncError::Empty`], [`RateSyncError::MixedIdentity`], or
+    /// [`RateSyncError::Overflow`] when the counts sum past `u32::MAX`.
+    pub fn merge_rate_states(states: &[RateLimitState]) -> Result<RateLimitState, RateSyncError> {
+        let first = states.first().ok_or(RateSyncError::Empty)?;
+        let mut merged = first.clone();
+        for s in &states[1..] {
+            if s.identity != first.identity {
+                return Err(RateSyncError::MixedIdentity);
+            }
+            merged.count = merged
+                .count
+                .checked_add(s.count)
+                .ok_or(RateSyncError::Overflow)?;
+            merged.window_start_ms = merged.window_start_ms.min(s.window_start_ms);
+            merged.expires_ms = merged.expires_ms.max(s.expires_ms);
         }
-        let identity = states[0].identity;
-        let count: u32 = states.iter().map(|s| s.count).sum();
-        let window_start_ms = states.iter().map(|s| s.window_start_ms).min().unwrap_or(0);
-        Some(RateLimitState {
-            identity,
-            count,
-            window_start_ms,
-        })
+        Ok(merged)
     }
 }
 
@@ -882,41 +1086,64 @@ mod tests {
     fn test_import_rate_state() {
         let mut mw = AuthMiddleware::new();
         let id = [0xEE; 32];
-        mw.import_rate_state(&RateLimitState {
-            identity: id,
-            count: 5,
-            window_start_ms: 1000,
-        });
+        mw.import_rate_state(
+            &[1; 32],
+            &RateLimitState {
+                identity: id,
+                count: 5,
+                window_start_ms: 1000,
+                expires_ms: 6000,
+            },
+            1000,
+        )
+        .unwrap();
         assert!(!mw.validate_rate_limit(&id, 1500, 5000, 5));
     }
 
     #[test]
     fn test_merge_rate_states() {
         let id = [0xFF; 32];
-        let states = vec![
-            RateLimitState {
-                identity: id,
-                count: 3,
-                window_start_ms: 1000,
-            },
-            RateLimitState {
-                identity: id,
-                count: 2,
-                window_start_ms: 500,
-            },
-            RateLimitState {
-                identity: id,
-                count: 1,
-                window_start_ms: 2000,
-            },
-        ];
+        let st = |count, window_start_ms, expires_ms| RateLimitState {
+            identity: id,
+            count,
+            window_start_ms,
+            expires_ms,
+        };
+        let states = vec![st(3, 1000, 6000), st(2, 500, 5500), st(1, 2000, 7000)];
         let merged = AuthMiddleware::merge_rate_states(&states).unwrap();
         assert_eq!(merged.count, 6);
         assert_eq!(merged.window_start_ms, 500);
+        assert_eq!(merged.expires_ms, 7000);
+    }
+
+    /// `RateSyncConfig` bounds keep the reported total below `u32::MAX`
+    /// (4,096 nodes x 1,000,000), so the checked sum is reached here only with
+    /// entries built past those bounds: an overflowing total holds the identity
+    #[test]
+    fn test_remote_total_overflow_is_none() {
+        let mut load = RemoteLoad::default();
+        load.nodes.insert([1; 32], (u32::MAX, 100));
+        load.nodes.insert([2; 32], (1, 100));
+        assert_eq!(load.count(0), None);
+        load.nodes.remove(&[2; 32]);
+        assert_eq!(load.count(0), Some(u32::MAX));
+    }
+
+    #[test]
+    fn test_count_u32_saturates() {
+        assert_eq!(count_u32(7), 7);
+        assert_eq!(count_u32(u32::MAX as usize), u32::MAX);
+        // one past u32::MAX truncates to 0 with `as`: it must saturate instead
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(count_u32(u32::MAX as usize + 1), u32::MAX);
+        assert_eq!(count_u32(usize::MAX), u32::MAX);
     }
 
     #[test]
     fn test_merge_rate_states_empty() {
-        assert!(AuthMiddleware::merge_rate_states(&[]).is_none());
+        assert_eq!(
+            AuthMiddleware::merge_rate_states(&[]),
+            Err(RateSyncError::Empty)
+        );
     }
 }
