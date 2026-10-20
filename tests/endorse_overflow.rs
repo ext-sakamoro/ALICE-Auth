@@ -23,18 +23,19 @@ fn a_window_ending_at_u64_max_is_accepted_and_verifies() {
     let e = endorse(&root, &user.id(), u64::MAX - 10, 10).expect("fits");
     assert_eq!(e.expires_ms, u64::MAX);
     assert!(verify_endorsement(&e, u64::MAX - 10));
-    assert!(verify_endorsement(&e, u64::MAX));
+    assert!(verify_endorsement(&e, u64::MAX - 1));
+    assert!(!verify_endorsement(&e, u64::MAX), "expired at expires_ms");
 }
 
-/// `ttl_ms = 0` gives `expires_ms == now_ms`; `verify_endorsement` refuses only when
-/// `now_ms > expires_ms`, so the endorsement verifies at that instant and not after
+/// `ttl_ms = 0` gives `expires_ms == now_ms`; `verify_endorsement` refuses from
+/// `expires_ms` on, so the endorsement never verifies
 #[test]
 fn a_zero_ttl_ends_at_now() {
     let root = Identity::from_seed(&[1u8; 32]);
     let user = Identity::from_seed(&[2u8; 32]);
     let e = endorse(&root, &user.id(), 5_000, 0).expect("fits");
     assert_eq!((e.issued_ms, e.expires_ms), (5_000, 5_000));
-    assert!(verify_endorsement(&e, 5_000));
+    assert!(!verify_endorsement(&e, 5_000));
     assert!(!verify_endorsement(&e, 5_001));
 }
 

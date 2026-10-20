@@ -55,6 +55,7 @@ extern crate std;
 pub mod challenge_ttl;
 pub mod ct;
 pub mod errors;
+pub mod expiry;
 pub mod hex;
 pub mod identity;
 /// Key rotation (`Vec` of previous generations、`std` 専用)
@@ -109,6 +110,7 @@ mod integration_tests;
 pub use crate::challenge_ttl::*;
 pub use crate::ct::*;
 pub use crate::errors::*;
+pub use crate::expiry::*;
 pub use crate::identity::*;
 #[cfg(feature = "std")]
 pub use crate::key_rotation::*;

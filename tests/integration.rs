@@ -307,12 +307,13 @@ fn endorse_fields_correct() {
 }
 
 #[test]
-fn endorsement_exactly_at_expiry_is_valid() {
+fn endorsement_exactly_at_expiry_is_invalid() {
     let signer = Identity::gen().unwrap();
     let target = Identity::gen().unwrap();
     let e = endorse(&signer, &target.id(), 0, 1000).unwrap();
-    // expires_ms == 1000, now_ms == 1000 → not > → valid
-    assert!(verify_endorsement(&e, 1000));
+    // expires_ms == 1000: valid at 999, expired from 1000 on
+    assert!(verify_endorsement(&e, 999));
+    assert!(!verify_endorsement(&e, 1000));
 }
 
 #[test]
@@ -597,7 +598,8 @@ mod api_tests {
     #[test]
     fn auth_token_not_expired_one_before_boundary() {
         let token = AuthToken::new(0, 5000).unwrap();
-        assert!(!token.is_expired(5000)); // expires_ms == 5000, now==5000 → not > → not expired
+        assert!(!token.is_expired(4999));
+        assert!(token.is_expired(5000)); // expires_ms == 5000: expired from that instant on
     }
 
     #[test]
