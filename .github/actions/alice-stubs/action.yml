@@ -2,9 +2,7 @@ name: 'ALICE-Auth Optional Bridge Stubs'
 description: |
   Create empty stub crates for ALICE-Auth's sibling path deps (alice-crypto)
   so that ALICE-Auth can resolve its workspace-relative path deps in CI.
-  These crates are private to the local ALICE Eco-System and not on crates.io.
-
-  Canonical CI template: [[reference_alice_ci_canonical_template]]
+  The stub's version must satisfy the requirement in Cargo.toml.
 
 runs:
   using: composite
@@ -20,7 +18,7 @@ runs:
         cat > "../ALICE-Crypto/Cargo.toml" <<'TOML'
         [package]
         name = "alice-crypto"
-        version = "0.1.0"
+        version = "0.4.1"
         edition = "2021"
         license = "MIT OR Apache-2.0"
 
