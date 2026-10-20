@@ -1,6 +1,5 @@
 name: Security & Hygiene
 
-# canonical CI template: [[reference_alice_ci_canonical_template]]
 # ALICE-Physics を base に ALICE-Auth 用に調整
 #
 # 目的:
@@ -88,7 +87,7 @@ jobs:
 
       # EmbarkStudios/cargo-deny-action@v2 は Docker container 内で稼働し、
       # /github/workspace のみ mount するため sibling path dep が見えず fail する
-      # 直接 install で回避 (canonical [[reference_alice_ci_canonical_template]] 罠 #1)
+      # 直接 install で回避
       - name: Install cargo-deny
         run: cargo install --locked cargo-deny
 
@@ -114,7 +113,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # CLAUDE.md「仮実装完了偽装の禁止ルール」準拠
+      # 未実装を黙って成功させる stub を本体に残さない
       - name: Block panic!(STUB) in src/**
         run: |
           set -eo pipefail
@@ -130,7 +129,7 @@ jobs:
             | grep -v ':[[:space:]]*//' | grep -vE ':[[:space:]]*/\*' || true)
           if [ -n "$hits" ]; then
             count=$(echo "$hits" | wc -l | tr -d ' ')
-            echo "::warning::${count} todo!()/unimplemented!() marker(s) (informational, CLAUDE.md legitimate fail-fast idiom)"
+            echo "::warning::${count} todo!()/unimplemented!() marker(s) (informational, a legitimate fail-fast idiom)"
           fi
 
       - name: Detect dbg!() residual in src/**
@@ -171,7 +170,6 @@ jobs:
       # 必要 file が漏れる — これらは repo / workspace に file がある限り
       # cargo build も cargo test も clippy も preflight も全部通り、
       # crates.io から取得した利用者だけが compile 不能になる
-      # (2026-09-28 ALICE-LOL lol.gbnf、canonical template 罠 #51)
       - name: cargo package (.crate を作る)
         run: cargo package --no-verify --allow-dirty
 
