@@ -105,8 +105,12 @@ pub enum AuthResponse {
 /// accepting any token. Uses `subtle::ConstantTimeEq` to guarantee
 /// timing-attack resistance.
 ///
-/// Enforces a `max_capacity` to prevent unbounded growth; when at capacity,
-/// the oldest entry is evicted on insert.
+/// Holds at most `max_capacity` entries and never forgets one to make room:
+/// when the list is full, [`Self::revoke`] refuses the new token with
+/// [`RevokeError::Full`] and leaves the list unchanged, so a token that was
+/// revoked stays revoked. An entry leaves the list only through
+/// [`Self::purge`] (by value) or [`Self::auto_purge`] (by age), both called
+/// explicitly by the owner of the list.
 pub struct RevocationList {
     revoked: Vec<([u8; 16], u64)>,
     pub max_capacity: usize,
@@ -114,6 +118,29 @@ pub struct RevocationList {
 
 /// Default maximum capacity for the revocation list.
 pub const DEFAULT_REVOCATION_CAPACITY: usize = 10_000;
+
+/// Why [`RevocationList::revoke`] did not record a token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RevokeError {
+    /// The list holds `capacity` entries. The token is not revoked: remove
+    /// entries that can no longer be presented ([`RevocationList::auto_purge`])
+    /// or raise `max_capacity`, then revoke it again.
+    Full { capacity: usize },
+}
+
+impl core::fmt::Display for RevokeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Full { capacity } => write!(
+                f,
+                "revocation list is full ({capacity} entries); the token was not revoked"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RevokeError {}
 
 impl Default for RevocationList {
     fn default() -> Self {
@@ -139,14 +166,26 @@ impl RevocationList {
     }
 
     /// Revoke a session token immediately with a timestamp.
-    pub fn revoke(&mut self, token: &[u8; 16], now_ms: u64) {
-        if !self.is_revoked(token) {
-            // Evict oldest if at capacity
-            if self.revoked.len() >= self.max_capacity {
-                self.revoked.remove(0);
-            }
-            self.revoked.push((*token, now_ms));
+    ///
+    /// Revoking a token that is already revoked succeeds and keeps its first
+    /// timestamp.
+    ///
+    /// # Errors
+    ///
+    /// [`RevokeError::Full`] when the list already holds `max_capacity`
+    /// entries. The list is unchanged and the token is **not** revoked; no
+    /// earlier entry is dropped to make room.
+    pub fn revoke(&mut self, token: &[u8; 16], now_ms: u64) -> Result<(), RevokeError> {
+        if self.is_revoked(token) {
+            return Ok(());
         }
+        if self.revoked.len() >= self.max_capacity {
+            return Err(RevokeError::Full {
+                capacity: self.max_capacity,
+            });
+        }
+        self.revoked.push((*token, now_ms));
+        Ok(())
     }
 
     /// Check if a session token has been revoked.
@@ -168,11 +207,14 @@ impl RevocationList {
         });
     }
 
-    /// Auto-purge revoked tokens older than `ttl_ms` from `now_ms`.
+    /// Remove the entries revoked more than `ttl_ms` before `now_ms`.
     ///
-    /// Tokens revoked more than `ttl_ms` ago would have expired naturally,
-    /// so they can be safely removed from the revocation list.
-    /// Returns the number of entries purged.
+    /// Pass the longest lifetime a token can have: a token revoked more than
+    /// that long ago has expired and is refused by its expiry check, so its
+    /// entry is no longer needed. A shorter `ttl_ms` makes still-valid revoked
+    /// tokens valid again. An entry whose timestamp is after `now_ms` is kept.
+    /// This is the only removal by age; the list never removes an entry on its
+    /// own. Returns the number of entries removed.
     pub fn auto_purge(&mut self, now_ms: u64, ttl_ms: u64) -> usize {
         let before = self.revoked.len();
         self.revoked
@@ -648,7 +690,7 @@ mod tests {
         let mut rl = RevocationList::new();
         let tok = [0xAA; 16];
         assert!(!rl.is_revoked(&tok));
-        rl.revoke(&tok, 1000);
+        rl.revoke(&tok, 1000).unwrap();
         assert!(rl.is_revoked(&tok));
         assert_eq!(rl.len(), 1);
     }
@@ -657,8 +699,8 @@ mod tests {
     fn test_revocation_no_duplicate() {
         let mut rl = RevocationList::new();
         let tok = [0xBB; 16];
-        rl.revoke(&tok, 1000);
-        rl.revoke(&tok, 2000);
+        rl.revoke(&tok, 1000).unwrap();
+        rl.revoke(&tok, 2000).unwrap();
         assert_eq!(rl.len(), 1);
     }
 
@@ -667,7 +709,7 @@ mod tests {
         let mut rl = RevocationList::new();
         let tok_a = [0x11; 16];
         let tok_b = [0x22; 16];
-        rl.revoke(&tok_a, 1000);
+        rl.revoke(&tok_a, 1000).unwrap();
         assert!(rl.is_revoked(&tok_a));
         assert!(!rl.is_revoked(&tok_b));
     }
@@ -677,8 +719,8 @@ mod tests {
         let mut rl = RevocationList::new();
         let tok_a = [0x11; 16];
         let tok_b = [0x22; 16];
-        rl.revoke(&tok_a, 1000);
-        rl.revoke(&tok_b, 2000);
+        rl.revoke(&tok_a, 1000).unwrap();
+        rl.revoke(&tok_b, 2000).unwrap();
         assert_eq!(rl.len(), 2);
         rl.purge(&[tok_a]);
         assert_eq!(rl.len(), 1);
@@ -689,9 +731,9 @@ mod tests {
     #[test]
     fn test_revocation_auto_purge() {
         let mut rl = RevocationList::new();
-        rl.revoke(&[0x11; 16], 1000);
-        rl.revoke(&[0x22; 16], 5000);
-        rl.revoke(&[0x33; 16], 9000);
+        rl.revoke(&[0x11; 16], 1000).unwrap();
+        rl.revoke(&[0x22; 16], 5000).unwrap();
+        rl.revoke(&[0x33; 16], 9000).unwrap();
         // Purge entries older than 5000ms from now_ms=10000
         let purged = rl.auto_purge(10_000, 5000);
         assert_eq!(purged, 1); // [0x11] at 1000 is >5000ms old
@@ -704,15 +746,20 @@ mod tests {
     #[test]
     fn test_revocation_max_capacity() {
         let mut rl = RevocationList::with_capacity(3);
-        rl.revoke(&[0x01; 16], 1000);
-        rl.revoke(&[0x02; 16], 2000);
-        rl.revoke(&[0x03; 16], 3000);
+        rl.revoke(&[0x01; 16], 1000).unwrap();
+        rl.revoke(&[0x02; 16], 2000).unwrap();
+        rl.revoke(&[0x03; 16], 3000).unwrap();
         assert_eq!(rl.len(), 3);
-        // Adding 4th evicts oldest
-        rl.revoke(&[0x04; 16], 4000);
+        // A 4th token is refused; no earlier entry is dropped
+        assert_eq!(
+            rl.revoke(&[0x04; 16], 4000),
+            Err(RevokeError::Full { capacity: 3 })
+        );
         assert_eq!(rl.len(), 3);
-        assert!(!rl.is_revoked(&[0x01; 16])); // evicted
-        assert!(rl.is_revoked(&[0x04; 16]));
+        assert!(rl.is_revoked(&[0x01; 16]));
+        assert!(!rl.is_revoked(&[0x04; 16]));
+        // An already revoked token still succeeds when the list is full
+        assert_eq!(rl.revoke(&[0x02; 16], 5000), Ok(()));
     }
 
     #[test]
@@ -725,7 +772,7 @@ mod tests {
         tok16.copy_from_slice(&token[..16]);
 
         let mut mw = AuthMiddleware::new();
-        mw.revocation.revoke(&tok16, 1000);
+        mw.revocation.revoke(&tok16, 1000).unwrap();
 
         let req = AuthRequest {
             token,

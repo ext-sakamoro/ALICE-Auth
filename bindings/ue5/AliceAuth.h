@@ -47,7 +47,9 @@ extern "C"
 
     // --- RevocationList ---
     void* aa_revlist_new();
-    void  aa_revlist_revoke(void* h, const uint8_t* token, uint64_t now_ms);
+    void* aa_revlist_new_with_capacity(uint32_t capacity);
+    // 0 = revoked, -1 = null argument, -2 = list full (token NOT revoked)
+    int32_t aa_revlist_revoke(void* h, const uint8_t* token, uint64_t now_ms);
     int32_t aa_revlist_is_revoked(const void* h, const uint8_t* token);
     uint32_t aa_revlist_auto_purge(void* h, uint64_t now_ms, uint64_t ttl_ms);
     void  aa_revlist_free(void* h);
@@ -261,6 +263,12 @@ public:
     {
     }
 
+    /// A list holding at most Capacity entries (at least 1).
+    explicit FAliceRevocationList(uint32_t Capacity)
+        : Handle(aa_revlist_new_with_capacity(Capacity))
+    {
+    }
+
     ~FAliceRevocationList()
     {
         if (Handle) { aa_revlist_free(Handle); Handle = nullptr; }
@@ -285,10 +293,12 @@ public:
 
     bool IsValid() const { return Handle != nullptr; }
 
-    /// Revoke a 16-byte session token.
-    void Revoke(const uint8_t Token[16], uint64_t NowMs)
+    /// Revoke a 16-byte session token. Returns false when the token was NOT
+    /// revoked (the list is full, or the handle is invalid); the token is then
+    /// still accepted, and aa_last_error describes why.
+    [[nodiscard]] bool Revoke(const uint8_t Token[16], uint64_t NowMs)
     {
-        if (Handle) aa_revlist_revoke(Handle, Token, NowMs);
+        return Handle && aa_revlist_revoke(Handle, Token, NowMs) == 0;
     }
 
     /// Check if a token is revoked (constant-time).
