@@ -96,6 +96,9 @@ pub mod ffi;
 #[cfg(all(feature = "ffi", feature = "nizk"))]
 pub mod ffi_nizk;
 
+#[cfg(feature = "ffi")]
+pub mod ffi_player;
+
 #[cfg(all(feature = "ffi", feature = "crypto"))]
 pub mod ffi_crypto;
 
@@ -119,6 +122,9 @@ pub use crate::verify::*;
 
 #[cfg(feature = "ffi")]
 pub use crate::ffi::*;
+
+#[cfg(feature = "ffi")]
+pub use crate::ffi_player::*;
 
 #[cfg(all(feature = "ffi", feature = "nizk"))]
 pub use crate::ffi_nizk::*;
