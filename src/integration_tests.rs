@@ -344,14 +344,14 @@ fn timed_challenge_at_boundary() {
     let i = Identity::gen().unwrap();
     let tp = make_timed_challenge(i.id(), 0).unwrap();
     let r = respond(&i, &Challenge { n: tp.c }).expect("sign");
-    // Exactly at TTL boundary → still valid (not >)
+    // 1ms before the TTL → valid
     assert!(matches!(
-        check_timed(&tp, &r, CHALLENGE_TTL_MS, CHALLENGE_TTL_MS),
+        check_timed(&tp, &r, CHALLENGE_TTL_MS - 1, CHALLENGE_TTL_MS),
         AuthResult::Ok(_)
     ));
-    // 1ms over → expired
+    // the age reaches the TTL → expired
     assert!(matches!(
-        check_timed(&tp, &r, CHALLENGE_TTL_MS + 1, CHALLENGE_TTL_MS),
+        check_timed(&tp, &r, CHALLENGE_TTL_MS, CHALLENGE_TTL_MS),
         AuthResult::Fail
     ));
 }

@@ -44,12 +44,13 @@ pub fn make_timed_challenge(id: AliceId, now_ms: u64) -> Result<TimedPending> {
 ///
 /// Returns `AuthResult::Fail` if:
 /// - The signature is invalid
-/// - The challenge has expired (`now_ms` - `created_ms` > `ttl_ms`)
+/// - The challenge has expired: its age (`now_ms` - `created_ms`) has reached
+///   `ttl_ms` ([`crate::is_expired`] on the age)
 /// - The RNG fails to generate a session token
 #[inline]
 #[must_use]
 pub fn check_timed(p: &TimedPending, r: &Response, now_ms: u64, ttl_ms: u64) -> AuthResult {
-    if now_ms.saturating_sub(p.created_ms) > ttl_ms {
+    if crate::is_expired(now_ms.saturating_sub(p.created_ms), ttl_ms) {
         return AuthResult::Fail;
     }
     let pending = Pending { id: p.id, c: p.c };

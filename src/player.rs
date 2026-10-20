@@ -413,7 +413,7 @@ impl Grant {
         if now_ms < self.issued_ms {
             return Err(GrantError::NotYetValid);
         }
-        if expired(now_ms, self.expires_ms) {
+        if crate::is_expired(now_ms, self.expires_ms) {
             return Err(GrantError::Expired);
         }
         if self.player != head.player
@@ -576,7 +576,7 @@ impl RevocationSet {
     pub fn purge(&mut self, now_ms: u64) -> usize {
         let before = self.entries.len();
         self.entries
-            .retain(|_, grant_expires_ms| !expired(now_ms, *grant_expires_ms));
+            .retain(|_, grant_expires_ms| !crate::is_expired(now_ms, *grant_expires_ms));
         before - self.entries.len()
     }
 
@@ -604,13 +604,6 @@ const GRANT_BODY_LEN: usize = GRANT_LEN - 64;
 
 /// Length of a [`Revocation`] without its signature.
 const REVOCATION_BODY_LEN: usize = REVOCATION_LEN - 64;
-
-/// Whether a time `now_ms` is past an expiry: the expiry itself is outside the window.
-/// Every expiry check of this module goes through here.
-#[cfg(feature = "alloc")]
-const fn expired(now_ms: u64, expires_ms: u64) -> bool {
-    now_ms >= expires_ms
-}
 
 /// The longest body this module signs (a grant without its signature).
 const MAX_BODY_LEN: usize = 137;

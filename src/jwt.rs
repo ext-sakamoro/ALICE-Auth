@@ -140,7 +140,7 @@ impl JwtClaims {
     /// 有効期限チェック。
     #[must_use]
     pub const fn is_expired(&self, now: u64) -> bool {
-        now >= self.exp
+        crate::is_expired(now, self.exp)
     }
 
     /// クレームをJSON文字列にシリアライズ（最小実装）。

@@ -46,9 +46,10 @@ impl Endorsement {
 
 /// Create an endorsement: the signer vouches for the target identity.
 ///
-/// The endorsement is valid from `now_ms` until `now_ms + ttl_ms` inclusive
-/// ([`verify_endorsement`] refuses only when `now_ms > expires_ms`), so
-/// `ttl_ms = 0` gives an endorsement that verifies at `now_ms` and not after.
+/// The endorsement is valid from `now_ms` while the time is before
+/// `now_ms + ttl_ms` ([`verify_endorsement`] refuses from `expires_ms` on,
+/// [`crate::is_expired`]), so `ttl_ms = 0` gives an endorsement that never
+/// verifies.
 ///
 /// # Errors
 ///
@@ -78,11 +79,14 @@ pub fn endorse(
 
 /// Verify a single endorsement: check signature validity AND expiry.
 ///
-/// Returns `false` if the signature is invalid or `now_ms > expires_ms`.
+/// Returns `false` if the signature is invalid or the endorsement has expired
+/// (`now_ms >= expires_ms`, [`crate::is_expired`]).
 #[inline]
 #[must_use]
 pub fn verify_endorsement(e: &Endorsement, now_ms: u64) -> bool {
-    if now_ms > e.expires_ms || e.endorsed.as_bytes().starts_with(crate::RESERVED_PREFIX) {
+    if crate::is_expired(now_ms, e.expires_ms)
+        || e.endorsed.as_bytes().starts_with(crate::RESERVED_PREFIX)
+    {
         return false;
     }
     let payload = Endorsement::payload(&e.endorsed, e.issued_ms, e.expires_ms);

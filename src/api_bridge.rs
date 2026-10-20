@@ -75,10 +75,11 @@ impl AuthToken {
         })
     }
 
-    /// Check if the token has expired.
+    /// Check if the token has expired: from `now_ms == expires_ms` on
+    /// ([`crate::is_expired`]).
     #[must_use]
     pub const fn is_expired(&self, now_ms: u64) -> bool {
-        now_ms > self.expires_ms
+        crate::is_expired(now_ms, self.expires_ms)
     }
 }
 
@@ -446,7 +447,7 @@ impl RemoteLoad {
     /// Drop the reports whose counted requests no longer matter at `now_ms`.
     fn prune(&mut self, now_ms: u64) {
         self.nodes
-            .retain(|_, &mut (_, expires_ms)| now_ms < expires_ms);
+            .retain(|_, &mut (_, expires_ms)| !crate::is_expired(now_ms, expires_ms));
     }
 
     /// The reported requests that still matter at `now_ms`, or `None` when the
@@ -457,7 +458,7 @@ impl RemoteLoad {
         }
         self.nodes
             .values()
-            .filter(|&&(_, expires_ms)| now_ms < expires_ms)
+            .filter(|&&(_, expires_ms)| !crate::is_expired(now_ms, expires_ms))
             .try_fold(0u32, |sum, &(count, _)| sum.checked_add(count))
     }
 }
@@ -551,7 +552,7 @@ impl AuthMiddleware {
         };
 
         // Check token expiry
-        if now_ms > expires_ms {
+        if crate::is_expired(now_ms, expires_ms) {
             self.denied_count += 1;
             return AuthResponse::Denied {
                 reason: "Token expired",
@@ -650,7 +651,7 @@ impl AuthMiddleware {
         let expires_ms = state
             .expires_ms
             .min(now_ms.saturating_add(self.rate_sync.report_ttl_ms));
-        if now_ms >= expires_ms {
+        if crate::is_expired(now_ms, expires_ms) {
             return Ok(());
         }
         let cap = self.rate_sync.remote_count;
@@ -728,7 +729,8 @@ mod tests {
     fn test_auth_token_expired() {
         let token = AuthToken::new(1000, 5000).unwrap();
         assert!(!token.is_expired(3000));
-        assert!(!token.is_expired(6000));
+        assert!(!token.is_expired(5999));
+        assert!(token.is_expired(6000));
         assert!(token.is_expired(6001));
     }
 
@@ -1127,6 +1129,17 @@ mod tests {
         assert_eq!(load.count(0), None);
         load.nodes.remove(&[2; 32]);
         assert_eq!(load.count(0), Some(u32::MAX));
+    }
+
+    /// `count` leaves out a report from its `expires_ms` on even when nothing
+    /// pruned it first (the callers prune, so only this test sees the filter)
+    #[test]
+    fn test_remote_count_excludes_a_report_at_its_expiry() {
+        let mut load = RemoteLoad::default();
+        load.nodes.insert([1; 32], (5, 100));
+        assert_eq!(load.count(99), Some(5));
+        assert_eq!(load.count(100), Some(0));
+        assert_eq!(load.count(101), Some(0));
     }
 
     #[test]
