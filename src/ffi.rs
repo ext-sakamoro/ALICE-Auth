@@ -237,7 +237,8 @@ pub unsafe extern "C" fn aa_rotating_id(h: *const RotHandle, out: *mut u8) {
         w32(&(*h).0.id().0, out);
     });
 }
-/// Verify a signature against any key (current + all previous).
+/// 1 when `pk` is the current key or a retained previous key of `h` and `s` is
+/// that key's valid signature of `m` (strict); 0 otherwise.
 ///
 /// # Safety
 ///

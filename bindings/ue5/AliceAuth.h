@@ -213,7 +213,8 @@ public:
         if (Handle) aa_rotating_id(Handle, OutId);
     }
 
-    /// Verify a signature against any key (current + all previous).
+    /// True when PublicKey is the current key or a retained previous key and
+    /// Signature is that key's valid signature of Message.
     bool VerifyAny(const uint8_t PublicKey[32], const uint8_t* Message, size_t MessageLen,
                    const uint8_t Signature[64]) const
     {

@@ -350,7 +350,8 @@ use alice_auth::RotatingIdentity;
 let mut rotating = RotatingIdentity::gen()?;
 let new_id = rotating.rotate(now_ms)?;
 
-// Verify against any generation (current or previous)
+// true when the key is this identity's current key or a retained previous one
+// and the signature is that key's valid signature
 assert!(rotating.verify_any(&old_public_key, message, &signature));
 ```
 

@@ -209,10 +209,10 @@ fn a_rotating_identity_refuses_a_small_order_r_under_its_previous_key() {
     assert_eq!(r.previous_id().map(|(p, _)| p), Some(id(KEY)));
     let msg = message(MSG);
     assert!(
-        r.verify_any(&r.id(), &msg, &sig(GOOD)),
+        r.verify_any(&id(KEY), &msg, &sig(GOOD)),
         "the previous key's signature is accepted"
     );
-    assert!(!r.verify_any(&r.id(), &msg, &sig(SMALL_ORDER_R)));
+    assert!(!r.verify_any(&id(KEY), &msg, &sig(SMALL_ORDER_R)));
 }
 
 #[cfg(feature = "api")]

@@ -419,7 +419,8 @@ impl PyRotatingIdentity {
             .collect()
     }
 
-    /// Verify a signature against any key (current + previous).
+    /// True when `id` is the current key or a retained previous key and the
+    /// signature is that key's valid signature of the message.
     fn verify_any(&self, id: &PyAliceId, message: &[u8], signature: &[u8]) -> PyResult<bool> {
         if signature.len() != 64 {
             return Err(PyValueError::new_err("signature must be 64 bytes"));

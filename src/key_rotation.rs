@@ -105,19 +105,15 @@ impl RotatingIdentity {
         self.current.sign(m)
     }
 
-    /// Verify a signature against the current key, falling back to all
-    /// previous keys. Returns true if any key matches.
+    /// `true` when `id` is this identity's current key or a retained previous
+    /// one and `s` is that key's valid signature of `m` (strict verification).
+    /// Another key, an evicted or cleared generation, and a signature made by a
+    /// different generation than `id` are refused.
     #[must_use]
     pub fn verify_any(&self, id: &AliceId, m: &[u8], s: &AliceSig) -> bool {
-        if ok(id, m, s) {
-            return true;
-        }
-        for (prev, _) in &self.previous {
-            if ok(&prev.id(), m, s) {
-                return true;
-            }
-        }
-        false
+        let mine =
+            self.current.id() == *id || self.previous.iter().any(|(prev, _)| prev.id() == *id);
+        mine && ok(id, m, s)
     }
 
     /// Clear all previous keys (after rotation window expires).

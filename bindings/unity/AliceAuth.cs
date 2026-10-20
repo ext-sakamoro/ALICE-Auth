@@ -195,7 +195,7 @@ namespace Alice.Auth
             return o;
         }
 
-        /// <summary>Verify a signature against any key (current + all previous).</summary>
+        /// <summary>True when publicKey is the current key or a retained previous key and signature is that key's valid signature of message.</summary>
         public bool VerifyAny(byte[] publicKey, byte[] message, byte[] signature)
         {
             if (publicKey == null || publicKey.Length != 32) return false;
