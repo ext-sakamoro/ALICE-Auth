@@ -349,23 +349,54 @@ pub extern "C" fn aa_revlist_new() -> *mut RevHandle {
         ))
     })
 }
+/// Create a new RevocationList holding at most `capacity` entries (at least 1).
+#[no_mangle]
+pub extern "C" fn aa_revlist_new_with_capacity(capacity: u32) -> *mut RevHandle {
+    ffi_guard(ptr::null_mut(), || {
+        Box::into_raw(Box::new(RevHandle(
+            crate::api_bridge::RevocationList::with_capacity(capacity as usize),
+        )))
+    })
+}
+/// `aa_revlist_revoke`: the token is revoked (now or already).
+pub const AA_REVLIST_OK: i32 = 0;
+/// `aa_revlist_revoke`: `h` or `token` is null (or the call panicked).
+pub const AA_REVLIST_ERR_NULL: i32 = -1;
+/// `aa_revlist_revoke`: the list is full and the token was **not** revoked.
+pub const AA_REVLIST_ERR_FULL: i32 = -2;
 /// Revoke a 16-byte token.
+///
+/// Returns [`AA_REVLIST_OK`] when the token is revoked (now or already),
+/// [`AA_REVLIST_ERR_FULL`] when the list is full, and [`AA_REVLIST_ERR_NULL`]
+/// for a null argument. On an error the token is not revoked, no earlier entry
+/// is dropped, and `aa_last_error` describes the error. A host must treat any
+/// value other than [`AA_REVLIST_OK`] as "the token is still accepted".
 ///
 /// # Safety
 ///
 /// - `h` must be a valid `RevHandle` pointer.
 /// - `token` must point to at least 16 readable bytes.
 #[no_mangle]
-pub unsafe extern "C" fn aa_revlist_revoke(h: *mut RevHandle, token: *const u8, now_ms: u64) {
-    ffi_guard((), || {
+pub unsafe extern "C" fn aa_revlist_revoke(
+    h: *mut RevHandle,
+    token: *const u8,
+    now_ms: u64,
+) -> i32 {
+    ffi_guard(AA_REVLIST_ERR_NULL, || {
         if h.is_null() || token.is_null() {
-            null_ptr();
-            return;
+            guard::set_last_error("aa_revlist_revoke: null handle or token");
+            return AA_REVLIST_ERR_NULL;
         }
         let mut t = [0u8; 16];
         core::ptr::copy_nonoverlapping(token, t.as_mut_ptr(), 16);
-        (*h).0.revoke(&t, now_ms);
-    });
+        match (*h).0.revoke(&t, now_ms) {
+            Ok(()) => AA_REVLIST_OK,
+            Err(e) => {
+                guard::set_last_error(format!("aa_revlist_revoke: {e}"));
+                AA_REVLIST_ERR_FULL
+            }
+        }
+    })
 }
 /// Check if a 16-byte token is revoked. Returns 1 if revoked, 0 otherwise.
 ///

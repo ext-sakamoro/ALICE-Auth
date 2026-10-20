@@ -482,22 +482,31 @@ pub struct PyRevocationList {
 
 #[pymethods]
 impl PyRevocationList {
+    /// `capacity`: the most entries the list holds (default 10,000).
     #[new]
-    fn new() -> Self {
+    #[pyo3(signature = (capacity=None))]
+    fn new(capacity: Option<usize>) -> Self {
         Self {
-            inner: crate::api_bridge::RevocationList::new(),
+            inner: capacity.map_or_else(
+                crate::api_bridge::RevocationList::new,
+                crate::api_bridge::RevocationList::with_capacity,
+            ),
         }
     }
 
     /// Revoke a 16-byte session token.
+    ///
+    /// Raises RuntimeError when the list is full: the token is then not
+    /// revoked, and no earlier entry is dropped.
     fn revoke(&mut self, token: &[u8], now_ms: u64) -> PyResult<()> {
         if token.len() != 16 {
             return Err(PyValueError::new_err("token must be 16 bytes"));
         }
         let mut t = [0u8; 16];
         t.copy_from_slice(token);
-        self.inner.revoke(&t, now_ms);
-        Ok(())
+        self.inner
+            .revoke(&t, now_ms)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
     /// Check if a token is revoked (constant-time).
