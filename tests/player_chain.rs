@@ -21,9 +21,13 @@ const LINK0: &str = "012b512b6e41b5d7005a4dfd97677df1e9823997d03a25970d476acb331
 const LINK1: &str = "012b512b6e41b5d7005a4dfd97677df1e9823997d03a25970d476acb331f14b03f010000008139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1d00700000000000077ed2f504e97659ea3dcbf33b358a4dd01a2e6bdfa65c61061b37fba5c31e819ceb4e5e4b90d8d2399b7bc08895abf253b1d5beeee9a09d8b1ed0417d98be406";
 
 /// The identity point (a small-order key) and R = B, S = 1, which a plain Ed25519 check
-/// accepts under it for every message (the same vector as tests/verify_strict.rs).
+/// accepts under it for every message (the same vector as `tests/verify_strict.rs`).
 const SMALL_ORDER_KEY: &str = "0100000000000000000000000000000000000000000000000000000000000000";
 const ANY_MESSAGE: &str = "58666666666666666666666666666666666666666666666666666666666666660100000000000000000000000000000000000000000000000000000000000000";
+/// LINK0's body signed by the first key with R the identity point (small order) and
+/// S = k a mod L, computed by the same separate program: a plain Ed25519 check accepts
+/// it ([S]B = R + [k]A holds), a strict one refuses the small-order R.
+const LINK0_SMALL_ORDER_R_SIG: &str = "0100000000000000000000000000000000000000000000000000000000000000d4cd77ec3bc51075eee33e1362a22588ff4421c4e2c30c303307854252215a07";
 
 fn bytes<const N: usize>(hex: &str) -> [u8; N] {
     assert_eq!(hex.len(), 2 * N, "{hex}");
@@ -250,6 +254,42 @@ fn rotating_to_the_same_key_or_a_weak_key_is_refused() {
             "to {new}"
         );
     }
+}
+
+/// The signature is checked under the key the chain is at, and the link must also name
+/// that key: a link the current key signed but whose `old_key` names another key is not
+/// a continuation.
+#[test]
+fn a_link_naming_another_old_key_is_refused() {
+    let player = PlayerId::from_genesis(&key(K1));
+    let l = hand_signed(&identity(1), player, 0, &key(K3), &key(K2), 1000);
+    assert_eq!(resolve_chain(&key(K1), &[l]), Err(GrantError::Chain));
+}
+
+/// Every link is checked, not only the last one.
+#[test]
+fn a_bad_link_before_a_good_one_is_refused() {
+    let mut bad = link0();
+    bad.sig.0[0] ^= 1;
+    assert_eq!(
+        resolve_chain(&key(K1), &[bad, link1()]),
+        Err(GrantError::Signature)
+    );
+    let mut bad = link0();
+    bad.seq = 7;
+    assert_eq!(
+        resolve_chain(&key(K1), &[bad, link1()]),
+        Err(GrantError::Signature)
+    );
+}
+
+#[test]
+fn a_link_with_a_small_order_r_is_refused() {
+    let l = RotationLink {
+        sig: AliceSig(bytes(LINK0_SMALL_ORDER_R_SIG)),
+        ..link0()
+    };
+    assert_eq!(resolve_chain(&key(K1), &[l]), Err(GrantError::Signature));
 }
 
 #[test]
