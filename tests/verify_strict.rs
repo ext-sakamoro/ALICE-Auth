@@ -82,7 +82,7 @@ fn rfc8032_vectors_are_accepted() {
         let identity = Identity::from_seed(&bytes::<32>(secret));
         assert_eq!(identity.id(), id(public), "{public}");
         let msg = message(msg);
-        assert_eq!(identity.sign(&msg), sig(s), "{s}");
+        assert_eq!(identity.sign(&msg).expect("sign"), sig(s), "{s}");
         assert_eq!(verify(&id(public), &msg, &sig(s)), Ok(()), "{s}");
     }
 }
@@ -146,7 +146,7 @@ fn the_challenge_response_check_refuses_the_small_order_key() {
         c: [0x17u8; 32],
     };
     let r = Response {
-        s: identity.sign32(&p.c),
+        s: identity.sign32(&p.c).expect("sign"),
     };
     assert!(matches!(check(&p, &r), AuthResult::Ok(_)));
 }

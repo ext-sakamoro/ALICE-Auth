@@ -37,6 +37,18 @@ fn key(hex: &str) -> AliceId {
     AliceId(bytes(hex))
 }
 
+/// `i`'s Ed25519 signature of `m` made from its seed, outside the crate: the
+/// public signing paths refuse a message under the reserved prefix, and these
+/// tests need signatures over the crate's tagged formats made by hand
+fn raw_sign(i: &Identity, m: &[u8]) -> AliceSig {
+    use ed25519_dalek::Signer;
+    AliceSig(
+        ed25519_dalek::SigningKey::from_bytes(&i.seed())
+            .sign(m)
+            .to_bytes(),
+    )
+}
+
 fn game() -> Identity {
     Identity::from_seed(&[9; 32])
 }
@@ -359,10 +371,19 @@ fn a_signature_made_for_another_domain_is_refused() {
     let g = game();
     let e = endorse(&g, &key(K2), 1500, 3500).expect("endorse");
     for (name, sig) in [
-        ("untagged", g.sign(&body)),
-        ("revocation tag", g.sign(&tagged(TAG_REVOCATION_V1, &body))),
-        ("rotation tag", g.sign(&tagged(TAG_ROTATION_V1, &body))),
-        ("player id tag", g.sign(&tagged(TAG_PLAYER_ID_V1, &body))),
+        ("untagged", raw_sign(&g, &body)),
+        (
+            "revocation tag",
+            raw_sign(&g, &tagged(TAG_REVOCATION_V1, &body)),
+        ),
+        (
+            "rotation tag",
+            raw_sign(&g, &tagged(TAG_ROTATION_V1, &body)),
+        ),
+        (
+            "player id tag",
+            raw_sign(&g, &tagged(TAG_PLAYER_ID_V1, &body)),
+        ),
         ("endorsement", e.sig),
         ("revocation", revocation0().sig),
     ] {
@@ -406,7 +427,10 @@ fn only_the_issuing_game_can_revoke() {
     );
     // a revocation that names the game but is signed by another key
     let forged = Revocation {
-        sig: other.sign(&tagged(TAG_REVOCATION_V1, &revocation0().to_bytes()[..65])),
+        sig: raw_sign(
+            &other,
+            &tagged(TAG_REVOCATION_V1, &revocation0().to_bytes()[..65]),
+        ),
         ..revocation0()
     };
     let mut set = empty();
@@ -443,9 +467,12 @@ fn a_revocation_signature_from_another_domain_is_refused() {
     let body: [u8; 65] = good.to_bytes()[..65].try_into().expect("65");
     let g = game();
     for (name, sig) in [
-        ("untagged", g.sign(&body)),
-        ("grant tag", g.sign(&tagged(TAG_GRANT_V1, &body))),
-        ("rotation tag", g.sign(&tagged(TAG_ROTATION_V1, &body))),
+        ("untagged", raw_sign(&g, &body)),
+        ("grant tag", raw_sign(&g, &tagged(TAG_GRANT_V1, &body))),
+        (
+            "rotation tag",
+            raw_sign(&g, &tagged(TAG_ROTATION_V1, &body)),
+        ),
         ("grant", grant0().sig),
     ] {
         let mut set = empty();
@@ -585,6 +612,6 @@ fn hand_signed_grant(signer: &Identity, issued_ms: u64, expires_ms: u64, nonce: 
         issued_ms,
         expires_ms,
         nonce,
-        sig: AliceSig(signer.sign(&m).0),
+        sig: AliceSig(raw_sign(signer, &m).0),
     }
 }

@@ -52,7 +52,9 @@ impl Endorsement {
 ///
 /// # Errors
 ///
-/// [`AuthError::E6`] when `now_ms + ttl_ms` exceeds `u64::MAX`; nothing is signed.
+/// [`AuthError::E6`] when `now_ms + ttl_ms` exceeds `u64::MAX`, [`AuthError::E7`]
+/// when `target` starts with [`crate::RESERVED_PREFIX`] (the payload would start
+/// like one of the crate's tagged formats; no real key does); nothing is signed.
 #[inline]
 pub fn endorse(
     signer: &Identity,
@@ -60,12 +62,15 @@ pub fn endorse(
     now_ms: u64,
     ttl_ms: u64,
 ) -> Result<Endorsement> {
+    if target.as_bytes().starts_with(crate::RESERVED_PREFIX) {
+        return Err(AuthError::E7);
+    }
     let expires_ms = now_ms.checked_add(ttl_ms).ok_or(AuthError::E6)?;
     let payload = Endorsement::payload(target, now_ms, expires_ms);
     Ok(Endorsement {
         endorser: signer.id(),
         endorsed: *target,
-        sig: signer.sign(&payload),
+        sig: signer.sign_reserved(&payload),
         issued_ms: now_ms,
         expires_ms,
     })
@@ -77,7 +82,7 @@ pub fn endorse(
 #[inline]
 #[must_use]
 pub fn verify_endorsement(e: &Endorsement, now_ms: u64) -> bool {
-    if now_ms > e.expires_ms {
+    if now_ms > e.expires_ms || e.endorsed.as_bytes().starts_with(crate::RESERVED_PREFIX) {
         return false;
     }
     let payload = Endorsement::payload(&e.endorsed, e.issued_ms, e.expires_ms);

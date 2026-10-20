@@ -85,14 +85,14 @@ fn verify_returns_err_for_invalid_pubkey() {
 fn ok_returns_true_for_correct_sig() {
     let id = Identity::gen().unwrap();
     let msg = b"alice auth message";
-    let sig = id.sign(msg);
+    let sig = id.sign(msg).expect("sign");
     assert!(ok(&id.id(), msg, &sig));
 }
 
 #[test]
 fn ok_returns_false_wrong_message() {
     let id = Identity::gen().unwrap();
-    let sig = id.sign(b"original");
+    let sig = id.sign(b"original").expect("sign");
     assert!(!ok(&id.id(), b"tampered", &sig));
 }
 
@@ -129,7 +129,7 @@ fn pending_fields_are_populated() {
 fn check_returns_ok_with_token() {
     let id = Identity::gen().unwrap();
     let p = make_challenge(id.id()).unwrap();
-    let r = respond(&id, &Challenge { n: p.c });
+    let r = respond(&id, &Challenge { n: p.c }).expect("sign");
     match check(&p, &r) {
         AuthResult::Ok(tok) => assert_eq!(tok.len(), 16),
         AuthResult::Fail => panic!("expected Ok"),
@@ -141,14 +141,14 @@ fn two_auth_flows_produce_different_tokens() {
     let id = Identity::gen().unwrap();
 
     let p1 = make_challenge(id.id()).unwrap();
-    let r1 = respond(&id, &Challenge { n: p1.c });
+    let r1 = respond(&id, &Challenge { n: p1.c }).expect("sign");
     let tok1 = match check(&p1, &r1) {
         AuthResult::Ok(t) => t,
         AuthResult::Fail => panic!("expected Ok"),
     };
 
     let p2 = make_challenge(id.id()).unwrap();
-    let r2 = respond(&id, &Challenge { n: p2.c });
+    let r2 = respond(&id, &Challenge { n: p2.c }).expect("sign");
     let tok2 = match check(&p2, &r2) {
         AuthResult::Ok(t) => t,
         AuthResult::Fail => panic!("expected Ok"),
@@ -163,7 +163,7 @@ fn replaying_response_to_different_pending_fails() {
     let p1 = make_challenge(id.id()).unwrap();
     let p2 = make_challenge(id.id()).unwrap();
     // Sign p1's nonce
-    let r = respond(&id, &Challenge { n: p1.c });
+    let r = respond(&id, &Challenge { n: p1.c }).expect("sign");
     // Use against p2 (different nonce) — must fail
     assert!(matches!(check(&p2, &r), AuthResult::Fail));
 }
@@ -203,8 +203,8 @@ fn different_seeds_give_different_ids() {
 fn sign32_matches_sign_on_32_bytes() {
     let id = Identity::gen().unwrap();
     let msg = [0xAA; 32];
-    let sig_via_sign = id.sign(&msg);
-    let sig_via_sign32 = id.sign32(&msg);
+    let sig_via_sign = id.sign(&msg).expect("sign");
+    let sig_via_sign32 = id.sign32(&msg).expect("sign");
     assert_eq!(sig_via_sign.0, sig_via_sign32.0);
 }
 
@@ -275,7 +275,7 @@ fn check_timed_wrong_signer_fails_even_within_ttl() {
     let id = Identity::gen().unwrap();
     let other = Identity::gen().unwrap();
     let tp = make_timed_challenge(id.id(), 0).unwrap();
-    let r = respond(&other, &Challenge { n: tp.c });
+    let r = respond(&other, &Challenge { n: tp.c }).expect("sign");
     assert!(matches!(
         check_timed(&tp, &r, 1000, CHALLENGE_TTL_MS),
         AuthResult::Fail
@@ -286,7 +286,7 @@ fn check_timed_wrong_signer_fails_even_within_ttl() {
 fn check_timed_zero_ttl_expires_immediately() {
     let id = Identity::gen().unwrap();
     let tp = make_timed_challenge(id.id(), 1000).unwrap();
-    let r = respond(&id, &Challenge { n: tp.c });
+    let r = respond(&id, &Challenge { n: tp.c }).expect("sign");
     // zero TTL: any now_ms > 1000 fails
     assert!(matches!(check_timed(&tp, &r, 1001, 0), AuthResult::Fail));
 }
@@ -447,7 +447,7 @@ fn rotating_identity_current_key_always_verifiable() {
     let mut ri = alice_auth::RotatingIdentity::gen().unwrap();
     for i in 0..4u64 {
         ri.rotate(i * 1000).unwrap();
-        let sig = ri.sign(b"current");
+        let sig = ri.sign(b"current").expect("sign");
         assert!(ri.verify_any(&ri.id(), b"current", &sig));
     }
 }
@@ -518,7 +518,7 @@ fn identity_seed_roundtrip() {
 fn verify32_matches_verify_on_32_byte_message() {
     let id = Identity::gen().unwrap();
     let msg = [0xBB; 32];
-    let sig = id.sign(&msg);
+    let sig = id.sign(&msg).expect("sign");
     assert!(alice_auth::verify32(&id.id(), &msg, &sig).is_ok());
     assert!(verify(&id.id(), &msg, &sig).is_ok());
 }
@@ -527,7 +527,7 @@ fn verify32_matches_verify_on_32_byte_message() {
 fn ok_returns_false_for_wrong_signer() {
     let id1 = Identity::gen().unwrap();
     let id2 = Identity::gen().unwrap();
-    let sig = id1.sign(b"test");
+    let sig = id1.sign(b"test").expect("sign");
     assert!(!ok(&id2.id(), b"test", &sig));
 }
 
@@ -736,7 +736,7 @@ mod api_tests {
     fn middleware_verified_count_accumulates() {
         let i = Identity::gen().unwrap();
         let token = AuthMiddleware::create_auth_token(1000, 60_000).unwrap();
-        let sig = i.sign(&token);
+        let sig = i.sign(&token).expect("sign");
         let req = AuthRequest {
             token,
             signature: sig,
@@ -753,7 +753,7 @@ mod api_tests {
     fn middleware_authorized_response_contains_correct_identity() {
         let i = Identity::gen().unwrap();
         let token = AuthMiddleware::create_auth_token(5000, 60_000).unwrap();
-        let sig = i.sign(&token);
+        let sig = i.sign(&token).expect("sign");
         let req = AuthRequest {
             token,
             signature: sig,

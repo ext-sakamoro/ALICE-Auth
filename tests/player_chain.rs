@@ -42,6 +42,18 @@ fn identity(b: u8) -> Identity {
     Identity::from_seed(&[b; 32])
 }
 
+/// `i`'s Ed25519 signature of `m` made from its seed, outside the crate: the
+/// public signing paths refuse a message under the reserved prefix, and these
+/// tests need signatures over the crate's tagged formats made by hand
+fn raw_sign(i: &Identity, m: &[u8]) -> AliceSig {
+    use ed25519_dalek::Signer;
+    AliceSig(
+        ed25519_dalek::SigningKey::from_bytes(&i.seed())
+            .sign(m)
+            .to_bytes(),
+    )
+}
+
 fn link0() -> RotationLink {
     RotationLink::from_bytes(&bytes::<ROTATION_LINK_LEN>(LINK0)).expect("LINK0 parses")
 }
@@ -327,10 +339,10 @@ fn a_signature_made_for_another_domain_is_refused() {
     let tagged = |tag: &[u8; 24]| {
         let mut m = tag.to_vec();
         m.extend_from_slice(&body);
-        id1.sign(&m)
+        raw_sign(&id1, &m)
     };
     for (name, sig) in [
-        ("untagged", id1.sign(&body)),
+        ("untagged", raw_sign(&id1, &body)),
         ("grant tag", tagged(TAG_GRANT_V1)),
         ("revocation tag", tagged(TAG_REVOCATION_V1)),
         ("player id tag", tagged(TAG_PLAYER_ID_V1)),
@@ -400,6 +412,6 @@ fn hand_signed(
         old_key: *old,
         new_key: *new,
         issued_ms,
-        sig: signer.sign(&m),
+        sig: raw_sign(signer, &m),
     }
 }

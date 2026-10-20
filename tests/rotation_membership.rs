@@ -12,7 +12,7 @@ use alice_auth::{Identity, RotatingIdentity};
 fn another_keys_valid_signature_is_refused() {
     let r = RotatingIdentity::with_max_generations(Identity::from_seed(&[1u8; 32]), 3);
     let stranger = Identity::from_seed(&[9u8; 32]);
-    let s = stranger.sign(b"m");
+    let s = stranger.sign(b"m").expect("sign");
     assert!(
         alice_auth::ok(&stranger.id(), b"m", &s),
         "the signature itself is valid"
@@ -24,7 +24,7 @@ fn another_keys_valid_signature_is_refused() {
 fn the_current_and_each_retained_previous_key_are_accepted() {
     let first = Identity::from_seed(&[2u8; 32]);
     let first_id = first.id();
-    let first_sig = first.sign(b"m");
+    let first_sig = first.sign(b"m").expect("sign");
     let mut r = RotatingIdentity::with_max_generations(first, 3);
     assert!(
         r.verify_any(&first_id, b"m", &first_sig),
@@ -32,7 +32,7 @@ fn the_current_and_each_retained_previous_key_are_accepted() {
     );
     let mut ids = vec![(first_id, first_sig)];
     for t in 0..3 {
-        let sig = r.sign(b"m");
+        let sig = r.sign(b"m").expect("sign");
         let id = r.id();
         assert!(r.verify_any(&id, b"m", &sig), "current at step {t}");
         r.rotate(t + 1).expect("rng");
@@ -48,7 +48,7 @@ fn the_current_and_each_retained_previous_key_are_accepted() {
 fn an_evicted_generation_is_refused() {
     let first = Identity::from_seed(&[3u8; 32]);
     let first_id = first.id();
-    let first_sig = first.sign(b"m");
+    let first_sig = first.sign(b"m").expect("sign");
     let mut r = RotatingIdentity::with_max_generations(first, 1);
     r.rotate(1).expect("rng");
     assert!(
@@ -66,7 +66,7 @@ fn an_evicted_generation_is_refused() {
 fn a_cleared_previous_key_is_refused() {
     let first = Identity::from_seed(&[4u8; 32]);
     let first_id = first.id();
-    let first_sig = first.sign(b"m");
+    let first_sig = first.sign(b"m").expect("sign");
     let mut r = RotatingIdentity::with_max_generations(first, 3);
     r.rotate(1).expect("rng");
     r.clear_previous();
@@ -77,13 +77,13 @@ fn a_cleared_previous_key_is_refused() {
 fn a_signature_is_not_accepted_under_another_generation() {
     let first = Identity::from_seed(&[5u8; 32]);
     let first_id = first.id();
-    let first_sig = first.sign(b"m");
+    let first_sig = first.sign(b"m").expect("sign");
     let mut r = RotatingIdentity::with_max_generations(first, 3);
     r.rotate(1).expect("rng");
     // the previous key's signature under the current id
     assert!(!r.verify_any(&r.id(), b"m", &first_sig));
     // and the current key's signature under the previous id
-    let current_sig = r.sign(b"m");
+    let current_sig = r.sign(b"m").expect("sign");
     assert!(!r.verify_any(&first_id, b"m", &current_sig));
     assert!(r.verify_any(&first_id, b"m", &first_sig));
 }
@@ -95,7 +95,7 @@ fn the_c_abi_refuses_another_key() {
     let h = aa_rotating_new();
     assert!(!h.is_null());
     let stranger = Identity::from_seed(&[9u8; 32]);
-    let s = stranger.sign(b"m");
+    let s = stranger.sign(b"m").expect("sign");
     let pk = stranger.id().0;
     // SAFETY: live arrays of the lengths the functions read; h from aa_rotating_new
     assert_eq!(

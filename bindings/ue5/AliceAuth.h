@@ -25,7 +25,7 @@ extern "C"
     // --- Core Identity ---
     void* aa_new();
     void  aa_id(const void* h, uint8_t* o);
-    void  aa_sign(const void* h, const uint8_t* c, uint8_t* o);
+    int32_t aa_sign(const void* h, const uint8_t* c, uint8_t* o);
     int32_t aa_verify(const uint8_t* pk, const uint8_t* m, size_t ml, const uint8_t* s);
     void  aa_free(void* h);
 
@@ -129,10 +129,12 @@ public:
         if (Handle) aa_id(Handle, OutId);
     }
 
-    /// Sign a 32-byte challenge. Writes 64-byte signature to OutSig.
-    void Sign(const uint8_t Challenge[32], uint8_t OutSig[64]) const
+    /// Sign a 32-byte challenge. Writes the 64-byte signature to OutSig and returns
+    /// true; returns false (OutSig untouched) without a handle or when the challenge
+    /// starts with the reserved prefix "alice-auth/".
+    [[nodiscard]] bool Sign(const uint8_t Challenge[32], uint8_t OutSig[64]) const
     {
-        if (Handle) aa_sign(Handle, Challenge, OutSig);
+        return Handle && aa_sign(Handle, Challenge, OutSig) == 0;
     }
 
     /// Verify an Ed25519 signature over a message.
@@ -151,7 +153,8 @@ public:
 struct FAliceEndorsement
 {
     /// Endorse a target identity. Writes 176 bytes to OutData and returns true;
-    /// returns false (OutData untouched) when NowMs + TtlMs exceeds u64::MAX.
+    /// returns false (OutData untouched) when NowMs + TtlMs exceeds u64::MAX or the
+    /// target starts with the reserved prefix "alice-auth/".
     [[nodiscard]] static bool Endorse(const FAliceIdentity& Signer, const uint8_t TargetId[32],
                                       uint64_t NowMs, uint64_t TtlMs, uint8_t OutData[176])
     {

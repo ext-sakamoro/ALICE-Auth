@@ -117,8 +117,8 @@ network.send(h);
 // 2. Receive challenge from server
 let c: Challenge = network.receive();
 
-// 3. Sign and respond
-let r = respond(&identity, &c);
+// 3. Sign and respond (a challenge that starts with b"alice-auth/" is refused)
+let r = respond(&identity, &c)?;
 network.send(r);
 ```
 
@@ -169,7 +169,7 @@ using Alice.Auth;
 // Generate identity (secret key stays in Rust memory)
 using var id = new AliceIdentity();
 byte[] publicKey = id.Id();      // 32 bytes
-byte[] sig = id.Sign(challenge);  // 64 bytes
+byte[] sig = id.Sign(challenge);  // 64 bytes; throws if it starts with "alice-auth/"
 
 // Verify
 bool ok = AliceIdentity.Verify(publicKey, message, sig);
@@ -214,7 +214,7 @@ Id.GetId(PublicKey);
 
 // Sign & verify
 uint8_t Sig[64];
-Id.Sign(Challenge, Sig);
+if (!Id.Sign(Challenge, Sig)) { /* no handle, or the challenge starts with "alice-auth/" */ }
 bool bOk = FAliceIdentity::Verify(PublicKey, Message, MessageLen, Sig);
 
 // Schnorr NIZK
@@ -258,7 +258,7 @@ import alice_auth as aa
 # Generate identity
 identity = aa.Identity()
 public_key = identity.id()       # bytes (32)
-sig = identity.sign(challenge)    # bytes (64)
+sig = identity.sign(challenge)    # bytes (64); ValueError if it starts with b"alice-auth/"
 ok = aa.verify(public_key, message, sig)
 
 # Schnorr NIZK
@@ -309,7 +309,7 @@ let identity = alice_auth::Identity::gen().unwrap();
 let sign_msg = b"GET /api/users";
 let auth = AuthContext::new(
     identity.id().into_bytes(),
-    identity.sign(sign_msg).into_bytes(),
+    identity.sign(sign_msg).unwrap().into_bytes(),
 );
 
 // Gateway: verify inline (after rate limiting, before forwarding)

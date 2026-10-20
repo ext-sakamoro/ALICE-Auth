@@ -57,8 +57,14 @@ impl PyIdentity {
     }
 
     /// Sign arbitrary message. Returns 64-byte signature.
-    fn sign(&self, message: &[u8]) -> Vec<u8> {
-        self.inner.sign(message).0.to_vec()
+    ///
+    /// Raises `ValueError` when the message starts with the reserved prefix
+    /// `alice-auth/`.
+    fn sign(&self, message: &[u8]) -> PyResult<Vec<u8>> {
+        self.inner
+            .sign(message)
+            .map(|s| s.0.to_vec())
+            .map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
     /// Sign 32-byte challenge (optimized path).
@@ -68,7 +74,10 @@ impl PyIdentity {
         }
         let mut arr = [0u8; 32];
         arr.copy_from_slice(challenge);
-        Ok(self.inner.sign32(&arr).0.to_vec())
+        self.inner
+            .sign32(&arr)
+            .map(|s| s.0.to_vec())
+            .map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
     fn __repr__(&self) -> String {
@@ -333,8 +342,13 @@ fn endorse(
     now_ms: u64,
     ttl_ms: u64,
 ) -> PyResult<(Vec<u8>, Vec<u8>, Vec<u8>, u64, u64)> {
-    let e = crate::endorse(&signer.inner, &target.inner, now_ms, ttl_ms)
-        .map_err(|_| PyValueError::new_err("now_ms + ttl_ms exceeds u64::MAX"))?;
+    let e = crate::endorse(&signer.inner, &target.inner, now_ms, ttl_ms).map_err(|e| {
+        PyValueError::new_err(if e == crate::AuthError::E7 {
+            "the target starts with the reserved prefix alice-auth/"
+        } else {
+            "now_ms + ttl_ms exceeds u64::MAX"
+        })
+    })?;
     Ok((
         e.endorser.0.to_vec(),
         e.endorsed.0.to_vec(),

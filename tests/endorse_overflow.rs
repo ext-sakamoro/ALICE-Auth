@@ -48,6 +48,7 @@ fn the_error_codes_keep_their_numbers() {
         (AuthError::E4, 4),
         (AuthError::E5, 5),
         (AuthError::E6, 6),
+        (AuthError::E7, 7),
     ];
     for (e, n) in codes {
         assert_eq!(e as u8, n);

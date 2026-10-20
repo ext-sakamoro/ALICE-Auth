@@ -99,9 +99,12 @@ impl RotatingIdentity {
     }
 
     /// Sign with the current key.
+    ///
+    /// # Errors
+    ///
+    /// [`SignError::ReservedPrefix`] as for [`Identity::sign`].
     #[inline]
-    #[must_use]
-    pub fn sign(&self, m: &[u8]) -> AliceSig {
+    pub fn sign(&self, m: &[u8]) -> core::result::Result<AliceSig, SignError> {
         self.current.sign(m)
     }
 
