@@ -299,7 +299,7 @@ fn check_timed_zero_ttl_expires_immediately() {
 fn endorse_fields_correct() {
     let signer = Identity::gen().unwrap();
     let target = Identity::gen().unwrap();
-    let e = endorse(&signer, &target.id(), 5000, 10_000);
+    let e = endorse(&signer, &target.id(), 5000, 10_000).unwrap();
     assert_eq!(e.endorser, signer.id());
     assert_eq!(e.endorsed, target.id());
     assert_eq!(e.issued_ms, 5000);
@@ -310,7 +310,7 @@ fn endorse_fields_correct() {
 fn endorsement_exactly_at_expiry_is_valid() {
     let signer = Identity::gen().unwrap();
     let target = Identity::gen().unwrap();
-    let e = endorse(&signer, &target.id(), 0, 1000);
+    let e = endorse(&signer, &target.id(), 0, 1000).unwrap();
     // expires_ms == 1000, now_ms == 1000 → not > → valid
     assert!(verify_endorsement(&e, 1000));
 }
@@ -319,7 +319,7 @@ fn endorsement_exactly_at_expiry_is_valid() {
 fn endorsement_one_ms_after_expiry_is_invalid() {
     let signer = Identity::gen().unwrap();
     let target = Identity::gen().unwrap();
-    let e = endorse(&signer, &target.id(), 0, 1000);
+    let e = endorse(&signer, &target.id(), 0, 1000).unwrap();
     assert!(!verify_endorsement(&e, 1001));
 }
 
@@ -329,9 +329,9 @@ fn verify_chain_3_hop() {
     let mid1 = Identity::gen().unwrap();
     let mid2 = Identity::gen().unwrap();
     let leaf = Identity::gen().unwrap();
-    let e1 = endorse(&root, &mid1.id(), 0, 100_000);
-    let e2 = endorse(&mid1, &mid2.id(), 0, 100_000);
-    let e3 = endorse(&mid2, &leaf.id(), 0, 100_000);
+    let e1 = endorse(&root, &mid1.id(), 0, 100_000).unwrap();
+    let e2 = endorse(&mid1, &mid2.id(), 0, 100_000).unwrap();
+    let e3 = endorse(&mid2, &leaf.id(), 0, 100_000).unwrap();
     assert!(verify_chain(&[e1, e2, e3], &root.id(), 1000));
 }
 
@@ -341,7 +341,7 @@ fn verify_chain_wrong_first_endorser() {
     let impersonator = Identity::gen().unwrap();
     let user = Identity::gen().unwrap();
     // Chain where first link is signed by impersonator, not root
-    let e = endorse(&impersonator, &user.id(), 0, 100_000);
+    let e = endorse(&impersonator, &user.id(), 0, 100_000).unwrap();
     assert!(!verify_chain(&[e], &root.id(), 1000));
 }
 
@@ -351,9 +351,9 @@ fn verify_chain_broken_at_second_link() {
     let mid = Identity::gen().unwrap();
     let unrelated = Identity::gen().unwrap();
     let leaf = Identity::gen().unwrap();
-    let e1 = endorse(&root, &mid.id(), 0, 100_000);
+    let e1 = endorse(&root, &mid.id(), 0, 100_000).unwrap();
     // Second link endorser is unrelated, not mid
-    let e2 = endorse(&unrelated, &leaf.id(), 0, 100_000);
+    let e2 = endorse(&unrelated, &leaf.id(), 0, 100_000).unwrap();
     assert!(!verify_chain(&[e1, e2], &root.id(), 1000));
 }
 
@@ -557,7 +557,7 @@ fn verify_chain_empty_returns_false() {
 fn verify_chain_single_valid() {
     let root = Identity::gen().unwrap();
     let leaf = Identity::gen().unwrap();
-    let e = endorse(&root, &leaf.id(), 0, 100_000);
+    let e = endorse(&root, &leaf.id(), 0, 100_000).unwrap();
     assert!(verify_chain(&[e], &root.id(), 1000));
 }
 
@@ -569,7 +569,7 @@ fn verify_chain_single_valid() {
 fn endorsement_tampered_sig_is_invalid() {
     let signer = Identity::gen().unwrap();
     let target = Identity::gen().unwrap();
-    let mut e = endorse(&signer, &target.id(), 0, 100_000);
+    let mut e = endorse(&signer, &target.id(), 0, 100_000).unwrap();
     e.sig = AliceSig::new([0u8; 64]);
     assert!(!verify_endorsement(&e, 500));
 }

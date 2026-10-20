@@ -135,6 +135,10 @@ pub unsafe extern "C" fn aa_free(h: *mut Handle) {
 /// - `h` must be a valid `Handle` pointer (the endorser).
 /// - `target` must point to 32 readable bytes (the endorsed public key).
 /// - `out` must point to at least 176 writable bytes.
+///
+/// Returns [`AA_ENDORSE_OK`], [`AA_ENDORSE_ERR_NULL`] for a null argument or
+/// [`AA_ENDORSE_ERR_OVERFLOW`] when `now_ms + ttl_ms` exceeds `u64::MAX`. On an
+/// error `out` is not written and `aa_last_error` describes it.
 #[no_mangle]
 pub unsafe extern "C" fn aa_endorse(
     h: *const Handle,
@@ -142,14 +146,17 @@ pub unsafe extern "C" fn aa_endorse(
     now_ms: u64,
     ttl_ms: u64,
     out: *mut u8,
-) {
-    ffi_guard((), || {
+) -> i32 {
+    ffi_guard(AA_ENDORSE_ERR_NULL, || {
         if h.is_null() || target.is_null() || out.is_null() {
-            null_ptr();
-            return;
+            guard::set_last_error("aa_endorse: null handle, target or output");
+            return AA_ENDORSE_ERR_NULL;
         }
         let target_id = AliceId(r32(target));
-        let e = super::endorse(&(*h).0, &target_id, now_ms, ttl_ms);
+        let Ok(e) = super::endorse(&(*h).0, &target_id, now_ms, ttl_ms) else {
+            guard::set_last_error("aa_endorse: now_ms + ttl_ms exceeds u64::MAX");
+            return AA_ENDORSE_ERR_OVERFLOW;
+        };
         let buf = core::slice::from_raw_parts_mut(out, 176);
         buf[0..32].copy_from_slice(&e.endorser.0);
         buf[32..64].copy_from_slice(&e.endorsed.0);
@@ -157,8 +164,15 @@ pub unsafe extern "C" fn aa_endorse(
         buf[128..136].copy_from_slice(&e.issued_ms.to_le_bytes());
         buf[136..144].copy_from_slice(&e.expires_ms.to_le_bytes());
         buf[144..176].fill(0);
-    });
+        AA_ENDORSE_OK
+    })
 }
+/// `aa_endorse`: the endorsement was written.
+pub const AA_ENDORSE_OK: i32 = 0;
+/// `aa_endorse`: a null argument (or the call panicked).
+pub const AA_ENDORSE_ERR_NULL: i32 = -1;
+/// `aa_endorse`: `now_ms + ttl_ms` exceeds `u64::MAX`.
+pub const AA_ENDORSE_ERR_OVERFLOW: i32 = -2;
 /// Verify an endorsement. Returns 1 if valid, 0 otherwise.
 ///
 /// # Safety

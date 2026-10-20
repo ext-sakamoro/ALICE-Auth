@@ -30,7 +30,8 @@ extern "C"
     void  aa_free(void* h);
 
     // --- Endorsement ---
-    void  aa_endorse(const void* h, const uint8_t* target, uint64_t now_ms, uint64_t ttl_ms, uint8_t* o);
+    // 0 = written, -1 = null argument, -2 = now_ms + ttl_ms exceeds u64::MAX (o untouched)
+    int32_t aa_endorse(const void* h, const uint8_t* target, uint64_t now_ms, uint64_t ttl_ms, uint8_t* o);
     int32_t aa_verify_endorsement(const uint8_t* data, uint64_t now_ms);
 
     // --- RotatingIdentity ---
@@ -148,11 +149,12 @@ public:
 /// Trust chain endorsement with expiry.
 struct FAliceEndorsement
 {
-    /// Endorse a target identity. Writes 176 bytes to OutData.
-    static void Endorse(const FAliceIdentity& Signer, const uint8_t TargetId[32],
-                        uint64_t NowMs, uint64_t TtlMs, uint8_t OutData[176])
+    /// Endorse a target identity. Writes 176 bytes to OutData and returns true;
+    /// returns false (OutData untouched) when NowMs + TtlMs exceeds u64::MAX.
+    [[nodiscard]] static bool Endorse(const FAliceIdentity& Signer, const uint8_t TargetId[32],
+                                      uint64_t NowMs, uint64_t TtlMs, uint8_t OutData[176])
     {
-        aa_endorse(Signer.GetHandle(), TargetId, NowMs, TtlMs, OutData);
+        return aa_endorse(Signer.GetHandle(), TargetId, NowMs, TtlMs, OutData) == 0;
     }
 
     /// Verify an endorsement (176 bytes). Returns true if valid and not expired.

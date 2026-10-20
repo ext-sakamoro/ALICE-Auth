@@ -30,7 +30,8 @@ namespace Alice.Auth
         [DllImport(Lib)] internal static extern void aa_free(IntPtr h);
 
         // --- Endorsement ---
-        [DllImport(Lib)] internal static extern void aa_endorse(IntPtr h, byte[] target, ulong now_ms, ulong ttl_ms, byte[] o);
+        // 0 = written, -1 = null argument, -2 = now_ms + ttl_ms exceeds u64::MAX (o untouched)
+        [DllImport(Lib)] internal static extern int aa_endorse(IntPtr h, byte[] target, ulong now_ms, ulong ttl_ms, byte[] o);
         [DllImport(Lib)] internal static extern int aa_verify_endorsement(byte[] data, ulong now_ms);
 
         // --- RotatingIdentity ---
@@ -150,7 +151,11 @@ namespace Alice.Auth
             if (targetId == null || targetId.Length != 32)
                 throw new ArgumentException("targetId must be 32 bytes");
             var o = new byte[176];
-            Native.aa_endorse(signer.handle, targetId, nowMs, ttlMs, o);
+            int rc = Native.aa_endorse(signer.handle, targetId, nowMs, ttlMs, o);
+            if (rc == -2)
+                throw new ArgumentOutOfRangeException(nameof(ttlMs), "nowMs + ttlMs exceeds u64::MAX");
+            if (rc != 0)
+                throw new InvalidOperationException("ALICE-Auth: endorse failed");
             return o;
         }
 
