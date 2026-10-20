@@ -212,6 +212,86 @@ fn a_link_count_that_overflows_is_refused() {
     assert_refused(code, GrantError::Length, "aa_player_chain_resolve", &player);
 }
 
+/// A link count whose byte length fits in `usize` but not in `isize` (a slice longer than
+/// `isize::MAX` bytes cannot exist) is refused before any read, as is one whose byte
+/// length passes the multiplication only.
+#[test]
+fn a_link_count_past_isize_max_is_refused_before_any_read() {
+    let link = bytes::<ROTATION_LINK_LEN>(LINK0);
+    let max_links = isize::MAX.unsigned_abs() / ROTATION_LINK_LEN;
+    for n in [max_links + 1, usize::MAX / ROTATION_LINK_LEN] {
+        let (mut player, mut key, mut since) = ([FILL; 32], [FILL; 32], 0u64);
+        aa_clear_last_error();
+        let code = unsafe {
+            aa_player_chain_resolve(
+                bytes::<32>(K1).as_ptr(),
+                link.as_ptr(),
+                n,
+                player.as_mut_ptr(),
+                key.as_mut_ptr(),
+                &raw mut since,
+            )
+        };
+        assert_refused(code, GrantError::Length, "aa_player_chain_resolve", &player);
+    }
+}
+
+/// A grant or revocation length other than the wire length is refused before the buffer
+/// is read: the pointer below points to 8 bytes, and none of these lengths may be read
+/// from it (the largest would not even form a slice).
+#[test]
+fn wire_lengths_are_checked_before_any_read() {
+    let small = [0u8; 8];
+    let game = bytes::<32>(GAME);
+    let set = aa_revset_new(1);
+    let g = handle(9);
+    let big = isize::MAX.unsigned_abs() + 1;
+    for len in [usize::MAX, big, GRANT_LEN + 1, GRANT_LEN - 1, 9, 0] {
+        aa_clear_last_error();
+        let mut player = [FILL; 32];
+        let (mut scope, mut expires) =
+            (u64::from_le_bytes([FILL; 8]), u64::from_le_bytes([FILL; 8]));
+        let h = head();
+        let code = unsafe {
+            aa_grant_verify(
+                small.as_ptr(),
+                len,
+                game.as_ptr(),
+                h.player.as_ptr(),
+                h.key.as_ptr(),
+                h.since_ms,
+                2000,
+                set,
+                player.as_mut_ptr(),
+                &raw mut scope,
+                &raw mut expires,
+            )
+        };
+        assert_refused(code, GrantError::Length, "aa_grant_verify", &player);
+        let mut out = [FILL; REVOCATION_LEN];
+        aa_clear_last_error();
+        let code = unsafe { aa_revocation_issue(g, small.as_ptr(), len, 3000, out.as_mut_ptr()) };
+        assert_refused(code, GrantError::Length, "aa_revocation_issue", &out);
+    }
+    for len in [
+        usize::MAX,
+        big,
+        REVOCATION_LEN + 1,
+        REVOCATION_LEN - 1,
+        9,
+        0,
+    ] {
+        aa_clear_last_error();
+        let code = unsafe { aa_revset_add(set, small.as_ptr(), len) };
+        assert_refused(code, GrantError::Length, "aa_revset_add", &[]);
+        assert_eq!(unsafe { aa_revset_len(set) }, 0);
+    }
+    unsafe {
+        aa_revset_free(set);
+        aa_free(g);
+    }
+}
+
 #[test]
 fn a_broken_chain_is_refused_with_the_rust_code() {
     let mut link = bytes::<ROTATION_LINK_LEN>(LINK0);

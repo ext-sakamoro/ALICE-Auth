@@ -2,7 +2,10 @@
 //!
 //! Every function returns `AA_PLAYER_OK` (0) or the negative code of
 //! [`GrantError::code`], sets `aa_last_error` on a refusal, and writes its outputs only on
-//! success. A null argument is [`GrantError::Null`].
+//! success. A null argument is [`GrantError::Null`]. A length argument is checked against
+//! the wire length (or, for rotation links, against the largest slice that can exist)
+//! before the buffer is read, so a wrong length is [`GrantError::Length`], never a read
+//! past the buffer.
 //! Wire forms are passed as byte buffers of the lengths below.
 
 use super::ffi::{guard, Handle};
@@ -130,7 +133,11 @@ pub unsafe extern "C" fn aa_player_chain_resolve(
         {
             return fail(F, GrantError::Null);
         }
-        let Some(total) = n_links.checked_mul(ROTATION_LINK_LEN) else {
+        // a slice longer than isize::MAX bytes cannot exist: refuse before building one
+        let Some(total) = n_links
+            .checked_mul(ROTATION_LINK_LEN)
+            .filter(|&t| isize::try_from(t).is_ok())
+        else {
             return fail(F, GrantError::Length);
         };
         let raw: &[u8] = if n_links == 0 {
@@ -235,6 +242,9 @@ pub unsafe extern "C" fn aa_grant_verify(
         {
             return fail(F, GrantError::Null);
         }
+        if grant_len != GRANT_LEN {
+            return fail(F, GrantError::Length);
+        }
         let head = ChainHead {
             player: PlayerId(rd(head_player)),
             key: AliceId(rd(head_key)),
@@ -272,6 +282,9 @@ pub unsafe extern "C" fn aa_revocation_issue(
         const F: &str = "aa_revocation_issue";
         if game.is_null() || grant.is_null() || out.is_null() {
             return fail(F, GrantError::Null);
+        }
+        if grant_len != GRANT_LEN {
+            return fail(F, GrantError::Length);
         }
         let issued = Grant::from_bytes(core::slice::from_raw_parts(grant, grant_len))
             .and_then(|g| Revocation::issue(&(*game).0, &g, revoked_ms));
@@ -319,6 +332,9 @@ pub unsafe extern "C" fn aa_revset_add(
         const F: &str = "aa_revset_add";
         if set.is_null() || rev.is_null() {
             return fail(F, GrantError::Null);
+        }
+        if rev_len != REVOCATION_LEN {
+            return fail(F, GrantError::Length);
         }
         let added = Revocation::from_bytes(core::slice::from_raw_parts(rev, rev_len))
             .and_then(|r| (*set).0.add(&r));
