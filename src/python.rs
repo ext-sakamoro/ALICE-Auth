@@ -68,6 +68,9 @@ impl PyIdentity {
     }
 
     /// Sign 32-byte challenge (optimized path).
+    ///
+    /// Raises `ValueError` when the challenge is not 32 bytes or starts with the
+    /// reserved prefix `alice-auth/`.
     fn sign32(&self, challenge: &[u8]) -> PyResult<Vec<u8>> {
         if challenge.len() != 32 {
             return Err(PyValueError::new_err("challenge must be exactly 32 bytes"));

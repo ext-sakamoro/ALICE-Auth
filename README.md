@@ -189,7 +189,7 @@ policy.Assign(publicKey, (1 << AlicePolicyEngine.Read) | (1 << AlicePolicyEngine
 bool canRead = policy.Check(publicKey, AlicePolicyEngine.Read);
 
 // Trust chain endorsement
-byte[] endorsement = AliceEndorsement.Endorse(id, targetId, nowMs, ttlMs);
+byte[] endorsement = AliceEndorsement.Endorse(id, targetId, nowMs, ttlMs);  // throws on overflow or a target starting with "alice-auth/"
 bool trusted = AliceEndorsement.Verify(endorsement, nowMs);
 
 // HD key derivation
@@ -234,7 +234,7 @@ bool bCanRead = Policy.Check(PublicKey, FAlicePolicyEngine::Read);
 
 // Trust chain endorsement
 uint8_t Endorsement[176];
-FAliceEndorsement::Endorse(Id, TargetId, NowMs, TtlMs, Endorsement);
+if (!FAliceEndorsement::Endorse(Id, TargetId, NowMs, TtlMs, Endorsement)) { /* overflow, or the target starts with "alice-auth/" */ }
 bool bTrusted = FAliceEndorsement::Verify(Endorsement, NowMs);
 
 // HD key derivation
@@ -276,7 +276,7 @@ policy.assign(public_key, 0b0011)  # Read + Write
 can_read = policy.check(public_key, 0)
 
 # Trust chain endorsement
-endorsement = aa.endorse(identity, target_id, now_ms, ttl_ms)  # ValueError if now_ms + ttl_ms exceeds u64::MAX
+endorsement = aa.endorse(identity, target_id, now_ms, ttl_ms)  # ValueError if now_ms + ttl_ms exceeds u64::MAX or the target starts with b"alice-auth/"
 trusted = aa.verify_endorsement(endorsement, now_ms)
 
 # Auth token
