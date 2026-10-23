@@ -20,7 +20,9 @@ Steps:
   and packaged with `cargo package`; its own `alice-*` path dependencies must be pinned in
   the same file and are packaged first, into the same registry (none falls through to
   crates.io); the index entry is read from the packaged manifest, its checksum is the
-  sha256 of the `.crate`;
+  sha256 of the `.crate`; one crate wanted at two commits (by git and git, or by git and a
+  different pin) is a failure naming both (the registry holds one version of it), the same
+  commit wanted twice is registered once;
 - the committed tree (HEAD) is copied beside the fetched siblings and packaged with the
   registry and a `[patch.crates-io]` entry per `alice-*` crate (dotted `--config` keys);
 - every `alice-*` package in the packaged Cargo.lock must come from the local registry with
@@ -298,12 +300,21 @@ def main(argv: list[str]) -> int:
 
         registered: dict[str, str] = {}   # name -> version
         cksums: dict[str, str] = {}       # name -> sha256
+        wanted: dict[str, tuple[str, str, str]] = {}  # name -> (repo, commit, who wanted it first)
         visiting: list[str] = []
 
         def register(name: str, repo: str, wanted_by: str, rev: str | None = None) -> None:
             """`rev` for a sibling taken by git (the rev is the pin), None for a path sibling (pinned in the pin
             file)"""
             if name in registered:
+                # one registry holds one version of a crate: a second requester at another commit would be checked
+                # against a commit it does not declare. A path sibling with no pin line takes the registered commit
+                first_repo, first_sha, first_by = wanted[name]
+                sha = rev or pins.get(repo)
+                if sha is not None and (repo, sha) != (first_repo, first_sha):
+                    raise Failed(f"{name} is wanted at two commits: {first_repo}@{first_sha} by {first_by} and "
+                                 f"{repo}@{sha} by {wanted_by} (one local registry holds one {name}: pin both to "
+                                 "the same commit)")
                 return
             if repo in visiting:
                 raise Failed(f"cycle of alice-* dependencies: {' -> '.join(visiting + [repo])}")
@@ -329,6 +340,7 @@ def main(argv: list[str]) -> int:
             ip.write_text(json.dumps(entry, separators=(",", ":")) + "\n")
             commit_index(index)
             registered[name], cksums[name] = entry["vers"], cksum
+            wanted[name] = (repo, sha, wanted_by)
             print(f"alice-local: {name} {entry['vers']} {repo}@{sha} cksum {cksum}")
             visiting.pop()
 
