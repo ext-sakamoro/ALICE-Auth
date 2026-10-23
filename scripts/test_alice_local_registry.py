@@ -13,7 +13,8 @@ given with --sibling-src, so nothing is fetched from GitHub.
 - the transitive sibling unpinned exits 2 naming it and who needs it;
 - a pinned version that does not satisfy the requirement exits 1 with cargo's message;
 - no alice-* path dependency, and a malformed pin, exit 2;
-- a registry directory it did not make is refused and left alone;
+- a registry directory it did not make, a link, or one others can write to is refused and
+  left alone;
 - two runs give the same checksums (the .crate of a commit is reproducible);
 - a problem the lock check reports fails the run;
 - the lock check rejects an alice-* package from crates.io, a checksum that is not the
@@ -137,6 +138,33 @@ class LocalRegistry(unittest.TestCase):
         self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
         self.assertIn("was not made by this script", p.stderr)
         self.assertTrue((foreign / "keep").is_file())
+
+    def test_a_link_or_a_shared_registry_dir_is_refused(self) -> None:
+        self.make_app('alice-fb = { path = "../ALICE-Fb", version = "0.3" }\n', self.both_pins())
+        spot = Path("/tmp/alice-local-registry/ALICE-App")
+        elsewhere = self.tmp / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / ".alice-local-registry").write_text("looks like ours\n")
+
+        def clear() -> None:
+            if spot.is_symlink() or spot.is_file():
+                spot.unlink()
+            else:
+                shutil.rmtree(spot, ignore_errors=True)
+        clear()
+        self.addCleanup(clear)
+        spot.symlink_to(elsewhere)
+        p = self.run_script()
+        self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+        self.assertIn("is not a directory (a link or a file)", p.stderr)
+        self.assertTrue((elsewhere / ".alice-local-registry").is_file())
+        clear()
+        spot.mkdir()
+        (spot / ".alice-local-registry").write_text("ours\n")
+        spot.chmod(0o777)
+        p = self.run_script()
+        self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+        self.assertIn("is writable by others", p.stderr)
 
     def test_a_lock_problem_fails_the_run(self) -> None:
         # the run must act on the lock check, not only compute it

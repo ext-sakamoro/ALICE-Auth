@@ -23,7 +23,8 @@ Steps:
 - the packaged crate is extracted and built on its own (`cargo check --all-features --locked`).
 
 The registry lives in /tmp/alice-local-registry/<this repository's directory name>, the same
-absolute path on every machine (a directory there not made by this script is refused): the
+absolute path on every machine (a link, another user's or a group / world writable directory
+there, or one not made by this script, is refused): the
 packaged lock of a sibling with its own alice-* dependency records the registry's URL, so the
 `.crate` checksums are the same on every machine for the same pins.
 
@@ -47,6 +48,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -74,6 +76,17 @@ def run(cmd: list, cwd: Path, env: dict | None = None) -> str:
     if p.returncode != 0:
         raise Failed(f"{' '.join(str(c) for c in cmd)} (in {cwd}) exited {p.returncode}:\n{p.stdout}{p.stderr}")
     return p.stdout
+
+
+def owned_private_dir(path: Path) -> None:
+    """refuse a link, a non-directory, another user's directory, or one others can write to"""
+    st = os.lstat(path)
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        raise Usage(f"{path} is not a directory (a link or a file): remove it first")
+    if st.st_uid != os.getuid():
+        raise Usage(f"{path} belongs to uid {st.st_uid}, not this user ({os.getuid()}): remove it first")
+    if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise Usage(f"{path} is writable by others (mode {stat.S_IMODE(st.st_mode):o}): remove it first")
 
 
 def read_pins(root: Path) -> dict[str, str]:
@@ -217,15 +230,31 @@ def main(argv: list[str]) -> int:
     # sibling that depends on another alice-* crate records the registry's file:// URL, so the
     # .crate (and its checksum) is the same everywhere only while that URL is (the path is not
     # resolved: on macOS /tmp is a link to /private/tmp, the URL keeps /tmp)
-    BASE.mkdir(parents=True, exist_ok=True)
-    lock_file = open(BASE / f"{root.name}.lock", "w")
+    # /tmp is shared: the directories must be real directories this user owns, not links,
+    # and nobody else may write into them (the .crate files and the index are trusted below)
+    try:
+        BASE.mkdir(mode=0o700)
+    except FileExistsError:
+        pass
+    owned_private_dir(BASE)
+    try:
+        fd = os.open(BASE / f"{root.name}.lock", os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    except OSError as e:
+        raise Usage(f"{BASE / (root.name + '.lock')}: cannot open without following a link ({e.strerror})") from None
+    lock_file = os.fdopen(fd, "w")
     fcntl.flock(lock_file, fcntl.LOCK_EX)
     tmp = BASE / root.name
-    if tmp.exists() and not (tmp / MARKER).is_file():
-        lock_file.close()
-        raise Usage(f"{tmp} exists and was not made by this script (no {MARKER}): remove it first")
-    shutil.rmtree(tmp, ignore_errors=True)
-    tmp.mkdir()
+    if os.path.lexists(tmp):
+        try:
+            owned_private_dir(tmp)
+        except Usage:
+            lock_file.close()
+            raise
+        if not (tmp / MARKER).is_file():
+            lock_file.close()
+            raise Usage(f"{tmp} exists and was not made by this script (no {MARKER}): remove it first")
+        shutil.rmtree(tmp)
+    tmp.mkdir(mode=0o700)
     (tmp / MARKER).write_text("made by scripts/alice_local_registry.py\n")
     try:
         reg, index, layout, target = tmp / "registry", tmp / "registry" / "index", tmp / "layout", tmp / "target"
