@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""Tests of scripts/alice_local_registry.py.
+
+Fixture repositories in a temporary directory, built with the real cargo (no crates.io
+dependency, so nothing is downloaded; cargo still reads the crates.io index for the patch):
+ALICE-Fa (alice-fa 0.2.0), ALICE-Fb (alice-fb 0.3.0, depends on alice-fa by path and
+"0.2"), and the crate under test ALICE-App (depends on alice-fb by path). The siblings are
+given with --sibling-src, so nothing is fetched from GitHub.
+
+- with both siblings pinned it exits 0, prints one `alice-local:` line per crate (name,
+  version, pinned commit, the sha256 of the .crate) and the count, and leaves the
+  repository clean (it packages a copy of HEAD);
+- the transitive sibling unpinned exits 2 naming it and who needs it;
+- a pinned version that does not satisfy the requirement exits 1 with cargo's message;
+- no alice-* path dependency, and a malformed pin, exit 2;
+- two runs give the same checksums (the .crate of a commit is reproducible);
+- the lock check rejects an alice-* package from crates.io, a checksum that is not the
+  .crate built here, and a registered crate missing from the lock.
+
+usage: python3 scripts/test_alice_local_registry.py
+"""
+from __future__ import annotations
+
+import importlib.util
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+SCRIPT = ROOT / "scripts" / "alice_local_registry.py"
+LINE = re.compile(r"^alice-local: (\S+) (\S+) (\S+)@([0-9a-f]{40}) cksum ([0-9a-f]{64})$", re.M)
+
+
+def git(*args: str, cwd: Path) -> str:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return subprocess.run(["git", "-c", "user.name=T", "-c", "user.email=t@example.invalid", *args], cwd=cwd,
+                          check=True, capture_output=True, text=True, env=env).stdout.strip()
+
+
+def crate(dir_: Path, name: str, version: str, deps: str = "") -> str:
+    """a git repository holding one library crate; returns its HEAD"""
+    (dir_ / "src").mkdir(parents=True)
+    (dir_ / "Cargo.toml").write_text(
+        f'[package]\nname = "{name}"\nversion = "{version}"\nedition = "2021"\n'
+        f'license = "MIT"\ndescription = "fixture"\n\n[dependencies]\n{deps}')
+    (dir_ / "src" / "lib.rs").write_text("pub fn f() -> u32 { 1 }\n")
+    git("init", "-q", "-b", "main", cwd=dir_)
+    git("add", "-A", cwd=dir_)
+    git("commit", "-q", "-m", "c", cwd=dir_)
+    return git("rev-parse", "HEAD", cwd=dir_)
+
+
+def load_script():
+    spec = importlib.util.spec_from_file_location("alice_local_registry", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class LocalRegistry(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="alice-local-registry-test-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.fa = crate(self.tmp / "ALICE-Fa", "alice-fa", "0.2.0")
+        self.fb = crate(self.tmp / "ALICE-Fb", "alice-fb", "0.3.0",
+                        'alice-fa = { path = "../ALICE-Fa", version = "0.2" }\n')
+        self.app = self.tmp / "ALICE-App"
+
+    def make_app(self, deps: str, pins: str) -> None:
+        crate(self.app, "alice-app", "0.1.0", deps)
+        (self.app / ".github").mkdir()
+        (self.app / ".github" / "alice-siblings").write_text(pins)
+        git("add", "-A", cwd=self.app)
+        git("commit", "-q", "-m", "pins", cwd=self.app)
+
+    def both_pins(self) -> str:
+        return f"# pinned\nALICE-Fa {self.fa}\nALICE-Fb {self.fb}\n"
+
+    def run_script(self) -> subprocess.CompletedProcess:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env["CARGO_TARGET_DIR"] = str(self.tmp / "target")
+        return subprocess.run([sys.executable, str(SCRIPT), "--sibling-src", f"ALICE-Fa={self.tmp / 'ALICE-Fa'}",
+                               "--sibling-src", f"ALICE-Fb={self.tmp / 'ALICE-Fb'}"], cwd=self.app,
+                              capture_output=True, text=True, env=env, timeout=600)
+
+    def test_transitive_siblings_come_from_the_local_registry(self) -> None:
+        self.make_app('alice-fb = { path = "../ALICE-Fb", version = "0.3" }\n', self.both_pins())
+        p = self.run_script()
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        lines = LINE.findall(p.stdout)
+        self.assertEqual([(n, v, r, s) for n, v, r, s, _ in lines],
+                         [("alice-fa", "0.2.0", "ALICE-Fa", self.fa), ("alice-fb", "0.3.0", "ALICE-Fb", self.fb)])
+        self.assertIn("2 alice-* crate(s) from the local registry", p.stdout)
+        self.assertEqual(git("status", "--porcelain", cwd=self.app), "")
+
+    def test_two_runs_give_the_same_checksums(self) -> None:
+        self.make_app('alice-fb = { path = "../ALICE-Fb", version = "0.3" }\n', self.both_pins())
+        a, b = self.run_script(), self.run_script()
+        self.assertEqual((a.returncode, b.returncode), (0, 0), a.stderr + b.stderr)
+        self.assertEqual([x[4] for x in LINE.findall(a.stdout)], [x[4] for x in LINE.findall(b.stdout)])
+        self.assertEqual(len(LINE.findall(a.stdout)), 2)
+
+    def test_an_unpinned_transitive_sibling_exits_2_naming_it(self) -> None:
+        self.make_app('alice-fb = { path = "../ALICE-Fb", version = "0.3" }\n', f"ALICE-Fb {self.fb}\n")
+        p = self.run_script()
+        self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+        self.assertIn("alice-fa (path ../ALICE-Fa, needed by ALICE-Fb) has no line in .github/alice-siblings",
+                      p.stderr)
+
+    def test_a_pinned_version_that_does_not_satisfy_the_requirement_fails(self) -> None:
+        self.make_app('alice-fb = { path = "../ALICE-Fb", version = "0.4" }\n', self.both_pins())
+        p = self.run_script()
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn('failed to select a version for the requirement `alice-fb = "^0.4"`', p.stderr)
+
+    def test_no_alice_path_dependency_exits_2(self) -> None:
+        self.make_app("", self.both_pins())
+        p = self.run_script()
+        self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+        self.assertIn("no alice-* path dependency", p.stderr)
+
+    def test_a_malformed_pin_exits_2(self) -> None:
+        self.make_app('alice-fb = { path = "../ALICE-Fb", version = "0.3" }\n', "ALICE-Fb abc\n")
+        p = self.run_script()
+        self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+        self.assertIn("needs '<Repo> <40 hex>'", p.stderr)
+
+
+class LockCheck(unittest.TestCase):
+    URI = "file:///reg/index"
+    GOOD = ('[[package]]\nname = "alice-app"\nversion = "0.1.0"\n\n'
+            '[[package]]\nname = "alice-fb"\nversion = "0.3.0"\n'
+            'source = "registry+file:///reg/index"\nchecksum = "' + "a" * 64 + '"\n')
+
+    def setUp(self) -> None:
+        self.mod = load_script()
+
+    def test_a_lock_from_the_local_registry_passes(self) -> None:
+        self.assertEqual(self.mod.lock_problems(self.GOOD, self.URI, {"alice-fb": "a" * 64}), [])
+
+    def test_an_alice_package_from_crates_io_is_refused(self) -> None:
+        lock = self.GOOD.replace("registry+file:///reg/index",
+                                 "registry+https://github.com/rust-lang/crates.io-index")
+        problems = self.mod.lock_problems(lock, self.URI, {"alice-fb": "a" * 64})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("not the local registry", problems[0])
+
+    def test_a_checksum_that_is_not_the_crate_built_here_is_refused(self) -> None:
+        problems = self.mod.lock_problems(self.GOOD, self.URI, {"alice-fb": "b" * 64})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("is not the .crate built here", problems[0])
+
+    def test_a_registered_crate_missing_from_the_lock_is_refused(self) -> None:
+        problems = self.mod.lock_problems(self.GOOD, self.URI, {"alice-fb": "a" * 64, "alice-fa": "c" * 64})
+        self.assertEqual(problems, ["alice-fa was registered but is not in the packaged Cargo.lock"])
+
+
+if __name__ == "__main__":
+    unittest.main()
