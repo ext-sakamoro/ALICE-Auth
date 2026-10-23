@@ -4,7 +4,9 @@
 Fixture repositories in a temporary directory, built with the real cargo (no crates.io
 dependency, so nothing is downloaded; cargo still reads the crates.io index for the patch):
 ALICE-Fa (alice-fa 0.2.0), ALICE-Fb (alice-fb 0.3.0, depends on alice-fa by path and
-"0.2"), and the crate under test ALICE-App (depends on alice-fb by path). The siblings are
+"0.2"), and the crate under test ALICE-App-<unique per test> (depends on alice-fb by path; the
+name is unique so its registry directory under /tmp/alice-local-registry is not shared with a
+parallel run, and the test removes it afterwards). The siblings are
 given with --sibling-src, so nothing is fetched from GitHub.
 
 - with both siblings pinned it exits 0, prints one `alice-local:` line per crate (name,
@@ -17,8 +19,12 @@ given with --sibling-src, so nothing is fetched from GitHub.
   left alone;
 - two runs give the same checksums (the .crate of a commit is reproducible);
 - a problem the lock check reports fails the run;
-- the lock check rejects an alice-* package from crates.io, a checksum that is not the
+- the lock check rejects an alice-* package from crates.io (registered or not), a checksum that is not the
   .crate built here, and a registered crate missing from the lock.
+
+Not tested: the check that the checked-out HEAD is the pinned commit; the checkout is made
+by that commit (`git checkout <sha>` / fetch by SHA), so it cannot differ, and the check is
+defensive.
 
 usage: python3 scripts/test_alice_local_registry.py
 """
@@ -32,6 +38,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -72,7 +79,17 @@ class LocalRegistry(unittest.TestCase):
         self.fa = crate(self.tmp / "ALICE-Fa", "alice-fa", "0.2.0")
         self.fb = crate(self.tmp / "ALICE-Fb", "alice-fb", "0.3.0",
                         'alice-fa = { path = "../ALICE-Fa", version = "0.2" }\n')
-        self.app = self.tmp / "ALICE-App"
+        self.app = self.tmp / f"ALICE-App-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        self.spot = Path("/tmp/alice-local-registry") / self.app.name
+        self.addCleanup(self.clear_spot)
+        self.addCleanup(lambda: Path(f"{self.spot}.lock").unlink(missing_ok=True))
+
+    def clear_spot(self) -> None:
+        if self.spot.is_symlink() or self.spot.is_file():
+            self.spot.unlink()
+        elif self.spot.exists():
+            self.spot.chmod(0o700)
+            shutil.rmtree(self.spot, ignore_errors=True)
 
     def make_app(self, deps: str, pins: str) -> None:
         crate(self.app, "alice-app", "0.1.0", deps)
@@ -129,11 +146,9 @@ class LocalRegistry(unittest.TestCase):
 
     def test_a_registry_dir_it_did_not_make_is_refused(self) -> None:
         self.make_app('alice-fb = { path = "../ALICE-Fb", version = "0.3" }\n', self.both_pins())
-        foreign = Path("/tmp/alice-local-registry/ALICE-App")
-        shutil.rmtree(foreign, ignore_errors=True)
+        foreign = self.spot
         foreign.mkdir(parents=True)
         (foreign / "keep").write_text("not the script's\n")
-        self.addCleanup(shutil.rmtree, foreign, True)
         p = self.run_script()
         self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
         self.assertIn("was not made by this script", p.stderr)
@@ -141,24 +156,17 @@ class LocalRegistry(unittest.TestCase):
 
     def test_a_link_or_a_shared_registry_dir_is_refused(self) -> None:
         self.make_app('alice-fb = { path = "../ALICE-Fb", version = "0.3" }\n', self.both_pins())
-        spot = Path("/tmp/alice-local-registry/ALICE-App")
+        spot = self.spot
         elsewhere = self.tmp / "elsewhere"
         elsewhere.mkdir()
         (elsewhere / ".alice-local-registry").write_text("looks like ours\n")
-
-        def clear() -> None:
-            if spot.is_symlink() or spot.is_file():
-                spot.unlink()
-            else:
-                shutil.rmtree(spot, ignore_errors=True)
-        clear()
-        self.addCleanup(clear)
+        spot.parent.mkdir(parents=True, exist_ok=True)
         spot.symlink_to(elsewhere)
         p = self.run_script()
         self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
         self.assertIn("is not a directory (a link or a file)", p.stderr)
         self.assertTrue((elsewhere / ".alice-local-registry").is_file())
-        clear()
+        self.clear_spot()
         spot.mkdir()
         (spot / ".alice-local-registry").write_text("ours\n")
         spot.chmod(0o777)
@@ -209,6 +217,15 @@ class LockCheck(unittest.TestCase):
         problems = self.mod.lock_problems(self.GOOD, self.URI, {"alice-fb": "b" * 64})
         self.assertEqual(len(problems), 1)
         self.assertIn("is not the .crate built here", problems[0])
+
+    def test_an_unregistered_alice_package_from_crates_io_is_refused(self) -> None:
+        # every alice-* package of the lock is checked, not only the registered ones
+        lock = self.GOOD + ('\n[[package]]\nname = "alice-zz"\nversion = "1.0.0"\n'
+                            'source = "registry+https://github.com/rust-lang/crates.io-index"\n'
+                            'checksum = "' + "d" * 64 + '"\n')
+        problems = self.mod.lock_problems(lock, self.URI, {"alice-fb": "a" * 64})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("alice-zz 1.0.0 comes from registry+https://github.com/rust-lang/crates.io-index", problems[0])
 
     def test_a_registered_crate_missing_from_the_lock_is_refused(self) -> None:
         problems = self.mod.lock_problems(self.GOOD, self.URI, {"alice-fb": "a" * 64, "alice-fa": "c" * 64})
