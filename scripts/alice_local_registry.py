@@ -8,10 +8,15 @@ path and by the commits `.github/alice-siblings` pins). So instead of crates.io,
 `alice-*` crates come from a registry built here, on a file:// index, out of exactly the
 pinned commits; every other crate still comes from crates.io.
 
+Siblings are taken two ways: a private sibling by path (its commit pinned in `.github/alice-siblings`),
+a public one by git (`git = "https://github.com/ext-sakamoro/<Repo>"`, a 40-hex `rev`: the rev is the pin).
+
 Steps:
-- the `alice-*` path dependencies of this crate are read from `cargo metadata`; none is a
-  failure (there is nothing to check), and each must have a line in `.github/alice-siblings`;
-- each pinned sibling is fetched at its commit (the checked-out HEAD must be that commit)
+- the `alice-*` path and git dependencies of this crate are read from `cargo metadata`; none is a
+  failure (there is nothing to check); each path one must have a line in `.github/alice-siblings`
+  (the file is needed only when there is one), each git one must be pinned by a 40-hex rev on the
+  public repository's https URL (a branch, a tag or a short rev is a usage error);
+- each sibling is fetched at its commit (the checked-out HEAD must be that commit)
   and packaged with `cargo package`; its own `alice-*` path dependencies must be pinned in
   the same file and are packaged first, into the same registry (none falls through to
   crates.io); the index entry is read from the packaged manifest, its checksum is the
@@ -117,6 +122,28 @@ def alice_path_deps(manifest_dir: Path) -> dict[str, str]:
     return deps
 
 
+GIT_SOURCE = re.compile(r"^git\+(https://github\.com/ext-sakamoro/([A-Za-z0-9_.-]+?)(?:\.git)?/?)\?(\w+)=([^#]+)")
+
+
+def alice_git_deps(manifest_dir: Path) -> dict[str, tuple[str, str, str]]:
+    """{crate name: (sibling repository name, its https URL, the 40-hex rev)} of the `alice-*` git dependencies; a git
+    dependency that is not pinned by a full rev on the public repository's https URL is a usage error (its commit
+    is not fixed, so nothing reproducible can be packaged)"""
+    meta = json.loads(run(["cargo", "metadata", "--no-deps", "--format-version", "1", "--offline"], manifest_dir))
+    pkg = next(p for p in meta["packages"] if Path(p["manifest_path"]).parent.resolve() == manifest_dir.resolve())
+    deps = {}
+    for d in pkg["dependencies"]:
+        src = d.get("source") or ""
+        if not d["name"].startswith("alice-") or not src.startswith("git+"):
+            continue
+        m = GIT_SOURCE.match(src)
+        if not m or m.group(3) != "rev" or not SHA.match(m.group(4)):
+            raise Usage(f"{d['name']} (git {src.removeprefix('git+')}) is not pinned by a 40-hex rev on "
+                        "https://github.com/ext-sakamoro/<Repo>")
+        deps[d["name"]] = (m.group(2), m.group(1), m.group(4))
+    return deps
+
+
 def fetch(repo: str, sha: str, dest: Path, sources: dict[str, Path]) -> None:
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     if repo in sources:
@@ -133,6 +160,8 @@ def fetch(repo: str, sha: str, dest: Path, sources: dict[str, Path]) -> None:
 
 
 def cargo_config(index: Path, registered: dict[str, str]) -> list[str]:
+    # a git dependency needs no patch of its own: `cargo package` locks the packaged (normalized) manifest, where the
+    # git source is gone and only the version requirement is left, which the crates-io patch below resolves
     args = ["--config", f'registries.{REGISTRY}.index="{index.as_uri()}"']
     for name, version in sorted(registered.items()):
         args += ["--config", f'patch.crates-io.{name}.version="={version}"',
@@ -221,10 +250,13 @@ def main(argv: list[str]) -> int:
         sources[repo] = Path(d).resolve()
 
     root = Path(run(["git", "rev-parse", "--show-toplevel"], Path.cwd()).strip())
-    pins = read_pins(root)
     direct = alice_path_deps(root)
-    if not direct:
-        raise Usage("no alice-* path dependency in Cargo.toml: nothing to package against the local registry")
+    direct_git = alice_git_deps(root)
+    if not direct and not direct_git:
+        raise Usage("no alice-* path dependency and no alice-* git dependency in Cargo.toml: nothing to package "
+                    "against the local registry")
+    # the pin file holds the commits of the path siblings; a crate that takes its siblings by git rev needs none
+    pins = read_pins(root) if direct or (root / PIN).exists() else {}
 
     # one fixed absolute directory, the same on every machine: the packaged Cargo.lock of a
     # sibling that depends on another alice-* crate records the registry's file:// URL, so the
@@ -268,18 +300,23 @@ def main(argv: list[str]) -> int:
         cksums: dict[str, str] = {}       # name -> sha256
         visiting: list[str] = []
 
-        def register(name: str, repo: str, wanted_by: str) -> None:
+        def register(name: str, repo: str, wanted_by: str, rev: str | None = None) -> None:
+            """`rev` for a sibling taken by git (the rev is the pin), None for a path sibling (pinned in the pin
+            file)"""
             if name in registered:
                 return
             if repo in visiting:
-                raise Failed(f"cycle of alice-* path dependencies: {' -> '.join(visiting + [repo])}")
-            if repo not in pins:
+                raise Failed(f"cycle of alice-* dependencies: {' -> '.join(visiting + [repo])}")
+            if rev is None and repo not in pins:
                 raise Usage(f"{name} (path ../{repo}, needed by {wanted_by}) has no line in {PIN}")
+            sha = rev or pins[repo]
             visiting.append(repo)
             dest = layout / repo
             if not dest.exists():
-                fetch(repo, pins[repo], dest, sources)
-            for dep, dep_repo in alice_path_deps(dest).items():
+                fetch(repo, sha, dest, sources)
+            for dep, (dep_repo, _, dep_rev) in sorted(alice_git_deps(dest).items()):
+                register(dep, dep_repo, repo, dep_rev)
+            for dep, dep_repo in sorted(alice_path_deps(dest).items()):
                 register(dep, dep_repo, repo)
             crate = package(dest, target, cargo_config(index, registered))
             cksum = hashlib.sha256(crate.read_bytes()).hexdigest()
@@ -292,9 +329,12 @@ def main(argv: list[str]) -> int:
             ip.write_text(json.dumps(entry, separators=(",", ":")) + "\n")
             commit_index(index)
             registered[name], cksums[name] = entry["vers"], cksum
-            print(f"alice-local: {name} {entry['vers']} {repo}@{pins[repo]} cksum {cksum}")
+            print(f"alice-local: {name} {entry['vers']} {repo}@{sha} cksum {cksum}")
             visiting.pop()
 
+        # the git siblings first: a path sibling that names the same crate by path takes the commit this crate pins
+        for name, (repo, _, rev) in sorted(direct_git.items()):
+            register(name, repo, "this crate", rev)
         for name, repo in sorted(direct.items()):
             register(name, repo, "this crate")
 
