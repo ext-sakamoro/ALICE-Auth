@@ -14,7 +14,7 @@ dependencies = [
 
 [[package]]
 name = "alice-auth"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "alice-crypto",
  "curve25519-dalek",
@@ -29,7 +29,7 @@ dependencies = [
 
 [[package]]
 name = "alice-crypto"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "argon2",
  "blake3",

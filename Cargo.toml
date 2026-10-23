@@ -1,6 +1,6 @@
 [package]
 name = "alice-auth"
-version = "0.5.1"
+version = "0.6.0"
 # slice::as_chunks (totp.rs) が 1.88 で stable、CI msrv job で実 compile
 rust-version = "1.88"
 edition = "2021"
@@ -39,7 +39,7 @@ subtle = { version = "2", default-features = false }
 zeroize = { version = "1", default-features = false, features = ["derive"] }
 serde = { version = "1.0", default-features = false, features = ["derive"], optional = true }
 pyo3 = { version = "0.27", features = ["extension-module"], optional = true }
-alice-crypto = { path = "../ALICE-Crypto", version = "0.5", optional = true, default-features = false, features = ["std"] }
+alice-crypto = { path = "../ALICE-Crypto", version = "0.6", optional = true, default-features = false, features = ["std"] }
 curve25519-dalek = { version = "4", default-features = false, optional = true, features = ["zeroize", "alloc"] }
 
 [profile.release]
