@@ -19,6 +19,8 @@ given with --sibling-src, so nothing is fetched from GitHub.
   left alone;
 - two runs give the same checksums (the .crate of a commit is reproducible);
 - a problem the lock check reports fails the run;
+- one alice-* crate wanted at two commits (by git and git, or by git and a different pin) exits 1
+  naming both, and wanted twice at the same commit is registered once;
 - the lock check rejects an alice-* package from crates.io (registered or not), a checksum that is not the
   .crate built here, and a registered crate missing from the lock.
 
@@ -218,6 +220,57 @@ class LocalRegistry(unittest.TestCase):
                 p = self.run_script()
                 self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
                 self.assertIn("40-hex rev", p.stderr)
+
+    def recommit(self, repo: str, files: dict[str, str]) -> str:
+        """a new commit of a fixture sibling (the earlier commit stays fetchable); returns its HEAD"""
+        d = self.tmp / repo
+        for rel, text in files.items():
+            (d / rel).write_text(text)
+        git("commit", "-q", "-am", "next", cwd=d)
+        return git("rev-parse", "HEAD", cwd=d)
+
+    def fb_on_fa_by_git(self, rev: str) -> str:
+        return self.recommit("ALICE-Fb", {"Cargo.toml": (
+            '[package]\nname = "alice-fb"\nversion = "0.3.0"\nedition = "2021"\nlicense = "MIT"\n'
+            f'description = "fixture"\n\n[dependencies]\nalice-fa = {{ git = "{self.GIT_FA}", rev = "{rev}", '
+            'version = "0.2" }\n')})
+
+    def test_one_crate_wanted_at_two_commits_by_git_fails_naming_both(self):
+        # this crate takes alice-fa at fa by git, ALICE-Fb takes it at fa2 by git: one registry holds one alice-fa,
+        # so the run fails instead of checking ALICE-Fb against a commit it does not declare
+        fa2 = self.recommit("ALICE-Fa", {"src/lib.rs": "pub fn f() -> u32 { 2 }\n"})
+        fb2 = self.fb_on_fa_by_git(fa2)
+        self.make_app(f'alice-fa = {{ git = "{self.GIT_FA}", rev = "{self.fa}", version = "0.2" }}\n'
+                      'alice-fb = { path = "../ALICE-Fb", version = "0.3" }\n', f"ALICE-Fb {fb2}\n")
+        p = self.run_script()
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn(f"alice-fa is wanted at two commits: ALICE-Fa@{self.fa} by this crate and ALICE-Fa@{fa2} "
+                      "by ALICE-Fb", p.stderr)
+
+    def test_one_crate_wanted_by_git_and_by_a_different_pin_fails_naming_both(self):
+        # this crate takes alice-fa at fa by git; the pin file pins ALICE-Fa (needed by ALICE-Fb by path) at fa2
+        fa2 = self.recommit("ALICE-Fa", {"src/lib.rs": "pub fn f() -> u32 { 2 }\n"})
+        self.make_app(f'alice-fa = {{ git = "{self.GIT_FA}", rev = "{self.fa}", version = "0.2" }}\n'
+                      'alice-fb = { path = "../ALICE-Fb", version = "0.3" }\n',
+                      f"ALICE-Fa {fa2}\nALICE-Fb {self.fb}\n")
+        p = self.run_script()
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn(f"alice-fa is wanted at two commits: ALICE-Fa@{self.fa} by this crate and ALICE-Fa@{fa2} "
+                      "by ALICE-Fb", p.stderr)
+
+    def test_one_crate_wanted_twice_at_the_same_commit_is_registered_once(self):
+        # by git twice, and by git and by an equal pin: the same commit, one registration
+        fb2 = self.fb_on_fa_by_git(self.fa)
+        for pins in (f"ALICE-Fb {fb2}\n", f"ALICE-Fa {self.fa}\nALICE-Fb {self.fb}\n"):
+            with self.subTest(pins=pins):
+                shutil.rmtree(self.app, ignore_errors=True)
+                self.clear_spot()
+                self.make_app(f'alice-fa = {{ git = "{self.GIT_FA}", rev = "{self.fa}", version = "0.2" }}\n'
+                              'alice-fb = { path = "../ALICE-Fb", version = "0.3" }\n', pins)
+                p = self.run_script()
+                self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+                self.assertEqual(sorted((n, s) for n, _, _, s, _ in LINE.findall(p.stdout) if n == "alice-fa"),
+                                 [("alice-fa", self.fa)])
 
     def test_a_malformed_pin_exits_2(self) -> None:
         self.make_app('alice-fb = { path = "../ALICE-Fb", version = "0.3" }\n', "ALICE-Fb abc\n")
