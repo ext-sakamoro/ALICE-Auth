@@ -2,7 +2,7 @@ name: Crypto features
 
 # The `crypto` / `nizk` features (and the `pyo3` binding that enables them) depend on the
 # sibling ALICE-Crypto, which the other jobs replace with an empty stub. This job builds
-# and tests them against the real crate at the revision .github/alice-crypto-pin names
+# and tests them against the real crate at the commit .github/alice-siblings names
 # (scripts/crypto_features.sh, also run by scripts/preflight.sh). It fails when the
 # requirement no longer resolves to that crate and when no `nizk::` or `crypto_bridge::`
 # test ran.
@@ -18,7 +18,7 @@ on:
       - 'scripts/crypto_features.sh'
       - 'pyproject.toml'
       - 'scripts/test_crypto_features.py'
-      - '.github/alice-crypto-pin'
+      - '.github/alice-siblings'
       - '.github/workflows/crypto-features.yml'
   pull_request:
     branches: [main]
@@ -30,7 +30,7 @@ on:
       - 'scripts/crypto_features.sh'
       - 'pyproject.toml'
       - 'scripts/test_crypto_features.py'
-      - '.github/alice-crypto-pin'
+      - '.github/alice-siblings'
       - '.github/workflows/crypto-features.yml'
   workflow_dispatch:
 

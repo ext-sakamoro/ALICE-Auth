@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/crypto_features.sh — build and test the `crypto` / `nizk` features (and check
 # each of `crypto`, `nizk`, `pyo3` on its own, and the Python wheel's feature set) against
-# the real ALICE-Crypto, at the revision .github/alice-crypto-pin names.
+# the real ALICE-Crypto, at the commit the `ALICE-Crypto` line of .github/alice-siblings names.
 #
 # These features depend on the sibling path dependency `../ALICE-Crypto`. The other CI
 # jobs replace it with an empty stub, so only this script compiles the code behind them
@@ -24,10 +24,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 root=$PWD
 
-pin=.github/alice-crypto-pin
-rev=$(awk '$1 == "rev" { print $2 }' "$pin")
+pin=.github/alice-siblings
+rev=$(awk '$1 == "ALICE-Crypto" { print $2; exit }' "$pin" 2>/dev/null || true)
 if [[ ! "$rev" =~ ^[0-9a-f]{40}$ ]]; then
-  echo "$pin: needs 'rev <40 hex>'" >&2
+  echo "$pin: needs 'ALICE-Crypto <40 hex>'" >&2
   exit 2
 fi
 # the feature set `maturin build` uses for the Python wheel

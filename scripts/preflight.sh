@@ -135,7 +135,7 @@ else
   echo "skip: nightly / cargo-fuzz not installed" >&2
 fi
 
-step "crypto-features.yml / crypto and nizk against the real ALICE-Crypto at .github/alice-crypto-pin"
+step "crypto-features.yml / crypto and nizk against the real ALICE-Crypto at .github/alice-siblings"
 python3 scripts/test_crypto_features.py
 ( export RUSTFLAGS="-Dwarnings"; scripts/crypto_features.sh )
 
