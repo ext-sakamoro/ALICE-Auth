@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # scripts/crypto_features.sh — build and test the `crypto` / `nizk` features (and check
 # each of `crypto`, `nizk`, `pyo3` on its own, and the Python wheel's feature set) against
-# the real ALICE-Crypto, at the commit the `ALICE-Crypto` line of .github/alice-siblings names.
+# the real ALICE-Crypto, at the commit Cargo.toml takes it from.
 #
-# These features depend on the sibling path dependency `../ALICE-Crypto`. The other CI
-# jobs replace it with an empty stub, so only this script compiles the code behind them
-# and notices a requirement the sibling's real version no longer satisfies.
+# ALICE-Crypto is a git dependency: `git = "https://github.com/ext-sakamoro/ALICE-Crypto"` at a
+# 40-hex `rev` (the rev is the pin; Cargo.lock records the same commit and `--locked` refuses a
+# lock that differs). Anything else (a path, a branch, a tag, a short rev, another URL) exits 2
+# before cargo runs, so the features are always built against the one commit the manifest names.
 #
-# It builds in a temporary layout: the committed tree (HEAD) as ALICE-Auth beside
-# ALICE-Crypto fetched at the pinned revision, so the result does not depend on what
-# sits next to this checkout. `--locked` keeps Cargo.lock as committed.
+# It builds the committed tree (HEAD) in a temporary directory, so the result does not depend
+# on uncommitted changes. `--locked` keeps Cargo.lock as committed.
 #
 # It fails when a test fails, when the requirement cannot be resolved, and when the run
 # compared nothing: no test passed, or no test of `nizk::` or `crypto_bridge::` ran
@@ -17,17 +17,29 @@
 # each of these features alone (a feature must enable what its code uses; the tests above
 # enable them together, which would hide a missing one) and the feature set the Python
 # wheel is built with (`[tool.maturin] features` in pyproject.toml). It exits 2 when it
-# cannot know what to build (a malformed pin, no wheel feature set).
+# cannot know what to build (alice-crypto not taken by git at a 40-hex rev, no wheel feature set).
 #
 # usage: scripts/crypto_features.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root=$PWD
 
-pin=.github/alice-siblings
-rev=$(awk '$1 == "ALICE-Crypto" { print $2; exit }' "$pin" 2>/dev/null || true)
-if [[ ! "$rev" =~ ^[0-9a-f]{40}$ ]]; then
-  echo "$pin: needs 'ALICE-Crypto <40 hex>'" >&2
+# the commit alice-crypto is taken at: git on the public repository's https URL, a 40-hex rev
+rev=$(python3 - <<'PY'
+import re
+import tomllib
+try:
+    d = tomllib.load(open("Cargo.toml", "rb"))["dependencies"]["alice-crypto"]
+except (OSError, KeyError, tomllib.TOMLDecodeError):
+    d = None
+ok = (isinstance(d, dict) and "path" not in d and not ({"branch", "tag"} & set(d))
+      and d.get("git") == "https://github.com/ext-sakamoro/ALICE-Crypto"
+      and isinstance(d.get("rev"), str) and re.fullmatch(r"[0-9a-f]{40}", d["rev"]))
+print(d["rev"] if ok else "")
+PY
+)
+if [[ -z "$rev" ]]; then
+  echo "Cargo.toml: alice-crypto needs git = \"https://github.com/ext-sakamoro/ALICE-Crypto\" and a 40-hex rev" >&2
   exit 2
 fi
 # the feature set `maturin build` uses for the Python wheel
@@ -49,10 +61,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir "$tmp/ALICE-Auth"
 git archive HEAD | tar -x -C "$tmp/ALICE-Auth"
-git init -q "$tmp/ALICE-Crypto"
-git -C "$tmp/ALICE-Crypto" fetch -q --depth 1 https://github.com/ext-sakamoro/ALICE-Crypto "$rev"
-git -C "$tmp/ALICE-Crypto" checkout -q FETCH_HEAD
-echo "ALICE-Crypto at $rev: $(awk -F'"' '/^version/ { print $2; exit }' "$tmp/ALICE-Crypto/Cargo.toml")"
+echo "ALICE-Crypto at $rev (git)"
 
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$root/target/crypto-features}"
 cd "$tmp/ALICE-Auth"

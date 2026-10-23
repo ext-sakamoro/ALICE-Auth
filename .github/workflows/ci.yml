@@ -6,9 +6,9 @@ name: CI
 # - no_std job: host (no alloc / alloc) + bare-metal thumbv7em (getrandom 非対応 target なので `custom-rng`
 #   = getrandom/custom 込み、rust-toolchain.toml の `targets` で pinned toolchain 側に install)
 #   library の `#[panic_handler]` は 2026-09-15 に削除 (最終 binary が提供する、library が持つと link 不能)
-# - feature-powerset: std 固定 depth 2 (pyo3 = toolchain / crypto・nizk = sibling 実体、除外)
+# - feature-powerset: std 固定 depth 2 (pyo3 = toolchain / crypto・nizk = crypto-features.yml が持つ、除外)
 #   `ffi` 単独が compile 不能だった (api 欠落) のを powerset が検出 → `ffi = ["std", "api"]`
-# - sibling path dep (alice-crypto、optional) は alice-stubs composite action で stub
+# - alice-crypto (optional) は git の 40 桁の rev で取る (Cargo.lock も同じ commit、stub は使わない)
 
 on:
   push:
@@ -29,8 +29,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Create ALICE optional bridge stubs
-        uses: ./.github/actions/alice-stubs
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Test (default)
@@ -48,8 +46,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Create ALICE optional bridge stubs
-        uses: ./.github/actions/alice-stubs
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -64,8 +60,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Create ALICE optional bridge stubs
-        uses: ./.github/actions/alice-stubs
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -84,8 +78,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Create ALICE optional bridge stubs
-        uses: ./.github/actions/alice-stubs
       # 宣言値と同じ toolchain: Cargo.toml の rust-version を bump したら同 commit で @<version> も更新
       - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
@@ -99,8 +91,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Create ALICE optional bridge stubs
-        uses: ./.github/actions/alice-stubs
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-hack
@@ -125,8 +115,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Create ALICE optional bridge stubs
-        uses: ./.github/actions/alice-stubs
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Doc (full native feature set)

@@ -135,11 +135,11 @@ else
   echo "skip: nightly / cargo-fuzz not installed" >&2
 fi
 
-step "crypto-features.yml / crypto and nizk against the real ALICE-Crypto at .github/alice-siblings"
+step "crypto-features.yml / crypto and nizk against ALICE-Crypto at the rev in Cargo.toml"
 python3 scripts/test_crypto_features.py
 ( export RUSTFLAGS="-Dwarnings"; scripts/crypto_features.sh )
 
-step "security-audit.yml / package-integrity: cargo package against the local registry of the pinned siblings"
+step "security-audit.yml / package-integrity: cargo package against the local registry of alice-crypto at its git rev"
 python3 scripts/test_alice_local_registry.py
 python3 scripts/alice_local_registry.py
 

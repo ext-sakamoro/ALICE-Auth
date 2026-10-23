@@ -4,8 +4,7 @@
 # ALICE-Physics の deny.toml を base に ALICE-Auth 用に調整
 #
 # ALICE-Auth 自体は AGPL-3.0 だが、target crate なので self-exception で許可
-# sibling stubs (alice-crypto) は alice-stubs action で
-# "MIT OR Apache-2.0" で生成される
+# alice-crypto は ALICE-Crypto の git の 40 桁の rev で取る (AGPL-3.0-or-later、下の exceptions)
 
 [graph]
 all-features = false
@@ -77,8 +76,7 @@ license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
 name = "alice-auth"
 allow = ["AGPL-3.0", "AGPL-3.0-only", "AGPL-3.0-or-later"]
 
-# AGPL sibling path dep
-# CI では MIT stub、local では実 crate (AGPL-3.0-or-later) が解決されるため両方許可
+# AGPL の git 依存 (ALICE-Crypto、Cargo.toml の rev の commit)
 [[licenses.exceptions]]
 name = "alice-crypto"
 allow = ["AGPL-3.0", "AGPL-3.0-only", "AGPL-3.0-or-later"]
@@ -104,6 +102,6 @@ skip-tree = []
 unknown-registry = "warn"
 unknown-git = "warn"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+allow-git = ["https://github.com/ext-sakamoro/ALICE-Crypto"]
 
 [sources.allow-org]

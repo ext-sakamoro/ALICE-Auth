@@ -1,9 +1,8 @@
 # Dependabot 設定
 #
-# 注: root cargo entry は意図的に置かない (sibling の path 依存は dependabot が解決できない)
-# 理由: root Cargo.toml に sibling path dep (= path = "../ALICE-Xxxx") が存在し、
-#       dependabot は sibling repo を checkout しないため
-#       path_dependencies_not_reachable で fail する
+# 注: root cargo entry は意図的に置かない
+# 理由: alice-crypto は git の 40 桁の rev で取り、その rev は手で動かす (Cargo.toml の rev と
+#       Cargo.lock の commit を同じ commit で動かし、crypto-features で確かめてから)
 #       root 直接の cargo dep update は手動 `cargo update -p <name>` で対応
 version: 2
 updates:

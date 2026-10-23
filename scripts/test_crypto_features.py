@@ -3,8 +3,7 @@
 
 A fake `cargo` first on PATH records each call's arguments and prints a canned test log,
 so these tests check what the script asks cargo to do and how it reads the result, not
-the build. The script still fetches ALICE-Crypto at the commit this repository's
-`.github/alice-siblings` names (network).
+the build (cargo would fetch ALICE-Crypto; the fake does not, so these tests are offline).
 
 - a log with no `nizk::` test, or no `crypto_bridge::` test, or no passed test at all,
   exits 1 naming what is missing;
@@ -15,26 +14,41 @@ the build. The script still fetches ALICE-Crypto at the commit this repository's
 - no `[tool.maturin] features` in pyproject.toml exits 2 before anything is built;
 - a failing `cargo test` fails the script even when the log still has enough passed tests,
   and the `pyo3` check is not run;
-- the commit comes from the `ALICE-Crypto` line of `.github/alice-siblings` (comments and other
-  repositories' lines are skipped), the old `.github/alice-crypto-pin` is gone and not read;
-- a malformed or missing `ALICE-Crypto` line exits 2 before anything is fetched.
+- the commit comes from Cargo.toml: alice-crypto by git on the public repository's https URL at a
+  40-hex rev; the old `.github/alice-crypto-pin` and `.github/alice-siblings` are gone and not read;
+- alice-crypto by path, by branch or tag, at a short or upper-case rev, from another URL, or
+  missing exits 2 before cargo runs.
 
 usage: python3 scripts/test_crypto_features.py
 """
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "crypto_features.sh"
-# the ALICE-Crypto commit the repository pins, read here without the script under test
-SIBLING_SHA = next(line.split()[1] for line in (ROOT / ".github" / "alice-siblings").read_text().splitlines()
-                   if line.split()[:1] == ["ALICE-Crypto"])
+URL = "https://github.com/ext-sakamoro/ALICE-Crypto"
+# the ALICE-Crypto commit the repository's manifest takes, read here without the script under test
+SIBLING_SHA = tomllib.loads((ROOT / "Cargo.toml").read_text())["dependencies"]["alice-crypto"]["rev"]
+assert re.fullmatch(r"[0-9a-f]{40}", SIBLING_SHA), SIBLING_SHA
+
+
+def manifest(dep: str | None) -> str:
+    """a Cargo.toml whose alice-crypto dependency is the inline table `dep` (none when None)"""
+    body = '[package]\nname = "x"\nversion = "0.1.0"\n\n[dependencies]\n'
+    if dep is not None:
+        body += f"alice-crypto = {{ {dep} }}\n"
+    return body
+
+
+GOOD = f'git = "{URL}", rev = "{SIBLING_SHA}", version = "0.6", optional = true'
 
 FAKE_CARGO = """#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_CARGO_ARGV"
@@ -65,7 +79,7 @@ class CryptoFeatures(unittest.TestCase):
         (self.r / "scripts").mkdir(parents=True)
         (self.r / ".github").mkdir()
         shutil.copy(SCRIPT, self.r / "scripts" / "crypto_features.sh")
-        shutil.copy(ROOT / ".github" / "alice-siblings", self.r / ".github" / "alice-siblings")
+        (self.r / "Cargo.toml").write_text(manifest(GOOD))
         self.write_wheel_features('["pyo3"]')
         git("init", "-q", "-b", "main", cwd=self.r)
         bin_dir = self.tmp / "bin"
@@ -114,7 +128,7 @@ class CryptoFeatures(unittest.TestCase):
     def test_a_good_log_passes_and_cargo_was_asked_for_every_feature_locked(self) -> None:
         p = self.run_script(NIZK + BRIDGE + OTHER + result(3))
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
-        self.assertIn(f"ALICE-Crypto at {SIBLING_SHA}:", p.stdout)
+        self.assertIn(f"ALICE-Crypto at {SIBLING_SHA} (git)", p.stdout)
         self.assertIn("3 passed (1 nizk::, 1 crypto_bridge::)", p.stdout)
         self.assertEqual(self.calls(), [
             "test --locked --features std,api,ffi,crypto,nizk",
@@ -163,32 +177,46 @@ class CryptoFeatures(unittest.TestCase):
         self.assertEqual(self.calls(), ["test --locked --features std,api,ffi,crypto,nizk"])
         self.assertNotIn("crypto features:", p.stdout)
 
-    def test_a_malformed_pin_exits_2(self) -> None:
-        for pin in ("", "ALICE-Crypto abc\n", "ALICE-Crypto " + "A" * 40 + "\n",
-                    "ALICE-OS-Keystore " + "a" * 40 + "\n", "# ALICE-Crypto " + "a" * 40 + "\n"):
-            with self.subTest(pin=pin):
-                (self.r / ".github" / "alice-siblings").write_text(pin)
+    def test_alice_crypto_not_by_git_at_a_full_rev_exits_2(self) -> None:
+        bad = {
+            "path": 'path = "../ALICE-Crypto", version = "0.6"',
+            "path and git": f'path = "../ALICE-Crypto", git = "{URL}", rev = "{SIBLING_SHA}"',
+            "branch": f'git = "{URL}", branch = "main"',
+            "tag": f'git = "{URL}", tag = "v0.6.0", rev = "{SIBLING_SHA}"',
+            "short rev": f'git = "{URL}", rev = "{SIBLING_SHA[:12]}"',
+            "upper-case rev": f'git = "{URL}", rev = "{SIBLING_SHA.upper()}"',
+            "other URL": f'git = "https://github.com/someone/ALICE-Crypto", rev = "{SIBLING_SHA}"',
+            "ssh URL": f'git = "ssh://git@github.com/ext-sakamoro/ALICE-Crypto", rev = "{SIBLING_SHA}"',
+            "missing": None,
+        }
+        for name, dep in bad.items():
+            with self.subTest(name=name):
+                (self.r / "Cargo.toml").write_text(manifest(dep))
                 p = self.run_script(NIZK + BRIDGE + result(2))
                 self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
-                self.assertIn(".github/alice-siblings: needs 'ALICE-Crypto <40 hex>'", p.stderr)
+                self.assertIn('Cargo.toml: alice-crypto needs git = "https://github.com/ext-sakamoro/ALICE-Crypto" '
+                              "and a 40-hex rev", p.stderr)
                 self.assertEqual(self.calls(), [])
 
-    def test_the_old_pin_file_is_gone_and_not_read(self) -> None:
+    def test_the_old_pin_files_are_gone_and_not_read(self) -> None:
         self.assertFalse((ROOT / ".github" / "alice-crypto-pin").exists())
-        # a well-formed old pin beside a malformed siblings line: reading the old file would build
+        self.assertFalse((ROOT / ".github" / "alice-siblings").exists())
+        # well-formed old pins beside a path dependency: reading either old file would build
         (self.r / ".github" / "alice-crypto-pin").write_text("rev " + SIBLING_SHA + "\n")
-        (self.r / ".github" / "alice-siblings").write_text("ALICE-Crypto abc\n")
+        (self.r / ".github" / "alice-siblings").write_text("ALICE-Crypto " + SIBLING_SHA + "\n")
+        (self.r / "Cargo.toml").write_text(manifest('path = "../ALICE-Crypto", version = "0.6"'))
         p = self.run_script(NIZK + BRIDGE + result(2))
         self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
         self.assertEqual(self.calls(), [])
 
-    def test_the_crypto_line_is_found_among_comments_and_other_siblings(self) -> None:
-        (self.r / ".github" / "alice-siblings").write_text(
-            "# pinned siblings\nALICE-OS-Keystore " + "0" * 40 + "\nALICE-Crypto " + SIBLING_SHA + "\n")
+    def test_the_rev_is_read_from_the_committed_manifest_however_it_is_spelled(self) -> None:
+        other = "0123456789abcdef0123456789abcdef01234567"
+        (self.r / "Cargo.toml").write_text(
+            '[package]\nname = "x"\nversion = "0.1.0"\n\n[dependencies.alice-crypto]\n'
+            f'# rev = "{"f" * 40}"\ngit = "{URL}"\nrev = \'{other}\'\nversion = "0.6"\n')
         p = self.run_script(NIZK + BRIDGE + OTHER + result(3))
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
-        self.assertIn(f"ALICE-Crypto at {SIBLING_SHA}:", p.stdout)
-
+        self.assertIn(f"ALICE-Crypto at {other} (git)", p.stdout)
 
 if __name__ == "__main__":
     unittest.main()
