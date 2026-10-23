@@ -17,7 +17,7 @@
 
 use alice_auth::{
     approve_recovery, validate_recovery, verify_recovery_approval, Identity, RecoveryConfig,
-    RecoveryRequest, TAG_RECOVERY_V2,
+    RecoveryError, RecoveryRequest, TAG_RECOVERY_V2,
 };
 
 const SIG: &str = "90e0350d8b16b2ac099003c3fc8d7e411c21757d3e263679cdd54c9e96e23a7f021ebb5f9e2437c0596a5b5104192f58c1cc81b34c201de0e811e3907ebb0800";
@@ -38,6 +38,15 @@ fn config() -> RecoveryConfig {
         threshold: 2,
         max_age_ms: 10_000,
     }
+}
+
+fn assert_ok(r: Result<alice_auth::ApprovedRecovery, RecoveryError>) {
+    let a = r.expect("the recovery is approved");
+    assert!(a.approvals() >= 2);
+}
+
+fn assert_refused(r: Result<alice_auth::ApprovedRecovery, RecoveryError>) {
+    assert!(r.is_err(), "the recovery was approved");
 }
 
 #[test]
@@ -63,9 +72,9 @@ fn approvals_of_a_fresh_request_recover() {
         approve_recovery(&id(5), &r, 1500),
         approve_recovery(&id(6), &r, 2000),
     ];
-    assert!(validate_recovery(&config(), &r, &approvals, 3000));
+    assert_ok(validate_recovery(&config(), &r, &approvals, 3000));
     // up to and including the end of the request's time
-    assert!(validate_recovery(&config(), &r, &approvals, 11_000));
+    assert_ok(validate_recovery(&config(), &r, &approvals, 11_000));
 }
 
 #[test]
@@ -77,9 +86,9 @@ fn approvals_collected_for_one_request_do_not_count_for_another() {
     ];
     // the same pair, a later request with another nonce: the old approvals are a replay
     let same_time = request([9; 16], 1000); // inside the approvals' time: only the nonce tells them apart
-    assert!(!validate_recovery(&config(), &same_time, &approvals, 3000));
+    assert_refused(validate_recovery(&config(), &same_time, &approvals, 3000));
     let later = request([9; 16], 50_000);
-    assert!(!validate_recovery(&config(), &later, &approvals, 50_500));
+    assert_refused(validate_recovery(&config(), &later, &approvals, 50_500));
 }
 
 #[test]
@@ -89,7 +98,7 @@ fn an_expired_request_is_refused() {
         approve_recovery(&id(5), &r, 1500),
         approve_recovery(&id(6), &r, 2000),
     ];
-    assert!(!validate_recovery(&config(), &r, &approvals, 11_001));
+    assert_refused(validate_recovery(&config(), &r, &approvals, 11_001));
 }
 
 #[test]
@@ -98,8 +107,8 @@ fn an_approval_dated_before_the_request_or_after_now_does_not_count() {
     let early = approve_recovery(&id(5), &r, 999);
     let late = approve_recovery(&id(5), &r, 4000);
     let good = approve_recovery(&id(6), &r, 2000);
-    assert!(!validate_recovery(&config(), &r, &[early, good], 3000));
-    assert!(!validate_recovery(&config(), &r, &[late, good], 3000));
+    assert_refused(validate_recovery(&config(), &r, &[early, good], 3000));
+    assert_refused(validate_recovery(&config(), &r, &[late, good], 3000));
 }
 
 #[test]
@@ -118,4 +127,85 @@ fn a_random_request_has_a_fresh_nonce() {
     let a = RecoveryRequest::new(id(1).id(), id(2).id(), 1000).unwrap();
     let b = RecoveryRequest::new(id(1).id(), id(2).id(), 1000).unwrap();
     assert_ne!(a.nonce, b.nonce);
+}
+
+#[test]
+fn the_approved_recovery_names_its_request_so_the_nonce_can_be_recorded() {
+    let r = request(NONCE, 1000);
+    let approvals = [
+        approve_recovery(&id(5), &r, 1500),
+        approve_recovery(&id(6), &r, 2000),
+    ];
+    let ok = validate_recovery(&config(), &r, &approvals, 3000).unwrap();
+    assert_eq!(*ok.request(), r);
+    assert_eq!(ok.request().nonce, NONCE);
+    assert_eq!(ok.approvals(), 2);
+}
+
+#[test]
+fn the_reason_of_a_refusal_is_told() {
+    let r = request(NONCE, 1000);
+    let one = [approve_recovery(&id(5), &r, 1500)];
+    assert_eq!(
+        validate_recovery(&config(), &r, &one, 3000).err(),
+        Some(RecoveryError::NotEnoughApprovals {
+            valid: 1,
+            needed: 2
+        })
+    );
+    assert_eq!(
+        validate_recovery(&config(), &r, &one, 11_001).err(),
+        Some(RecoveryError::Expired {
+            age_ms: 10_001,
+            max_age_ms: 10_000
+        })
+    );
+    assert_eq!(
+        validate_recovery(&config(), &r, &one, 999).err(),
+        Some(RecoveryError::NotYetIssued)
+    );
+    let empty = RecoveryConfig {
+        guardians: vec![],
+        threshold: 0,
+        max_age_ms: 10_000,
+    };
+    assert_eq!(
+        validate_recovery(&empty, &r, &one, 3000).err(),
+        Some(RecoveryError::NotConfigured)
+    );
+    assert!(!RecoveryError::NotConfigured.to_string().is_empty());
+}
+
+#[test]
+fn an_approval_of_another_pair_with_the_same_nonce_does_not_count() {
+    // A2: the nonce alone does not bind the approval; the pair does too
+    let r = request(NONCE, 1000);
+    let other = RecoveryRequest::with_nonce(id(3).id(), id(4).id(), NONCE, 1000);
+    let approvals = [
+        approve_recovery(&id(5), &other, 1500),
+        approve_recovery(&id(6), &other, 2000),
+    ];
+    assert_eq!(
+        validate_recovery(&config(), &r, &approvals, 3000).err(),
+        Some(RecoveryError::NotEnoughApprovals {
+            valid: 0,
+            needed: 2
+        })
+    );
+}
+
+#[test]
+fn an_approval_with_a_flipped_signature_byte_does_not_count() {
+    // A11: fed to validate_recovery, not only to verify_recovery_approval
+    let r = request(NONCE, 1000);
+    let mut bad = approve_recovery(&id(5), &r, 1500);
+    bad.sig.0[0] ^= 1;
+    let good = approve_recovery(&id(6), &r, 2000);
+    assert_eq!(
+        validate_recovery(&config(), &r, &[bad, good], 3000).err(),
+        Some(RecoveryError::NotEnoughApprovals {
+            valid: 1,
+            needed: 2
+        })
+    );
 }
