@@ -91,12 +91,15 @@ class LocalRegistry(unittest.TestCase):
             self.spot.chmod(0o700)
             shutil.rmtree(self.spot, ignore_errors=True)
 
-    def make_app(self, deps: str, pins: str) -> None:
+    def make_app(self, deps: str, pins: str | None) -> None:
         crate(self.app, "alice-app", "0.1.0", deps)
-        (self.app / ".github").mkdir()
-        (self.app / ".github" / "alice-siblings").write_text(pins)
+        if pins is not None:
+            (self.app / ".github").mkdir()
+            (self.app / ".github" / "alice-siblings").write_text(pins)
         git("add", "-A", cwd=self.app)
-        git("commit", "-q", "-m", "pins", cwd=self.app)
+        git("commit", "-q", "--allow-empty", "-m", "pins", cwd=self.app)
+
+    GIT_FA = "https://github.com/ext-sakamoro/ALICE-Fa"
 
     def both_pins(self) -> str:
         return f"# pinned\nALICE-Fa {self.fa}\nALICE-Fb {self.fb}\n"
@@ -186,6 +189,35 @@ class LocalRegistry(unittest.TestCase):
             mod.main(["--sibling-src", f"ALICE-Fa={self.tmp / 'ALICE-Fa'}",
                       "--sibling-src", f"ALICE-Fb={self.tmp / 'ALICE-Fb'}"])
         self.assertIn("alice-fb comes from somewhere else", str(e.exception))
+
+    def test_a_git_rev_dependency_comes_from_the_local_registry_without_a_pin_file(self) -> None:
+        # a public sibling taken by git: the rev is the pin (no .github/alice-siblings needed), the commit is fetched,
+        # packaged and registered like a path sibling's pinned commit
+        self.make_app(f'alice-fa = {{ git = "{self.GIT_FA}", rev = "{self.fa}", version = "0.2" }}\n', None)
+        p = self.run_script()
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertEqual([(n, v, r, s) for n, v, r, s, _ in LINE.findall(p.stdout)],
+                         [("alice-fa", "0.2.0", "ALICE-Fa", self.fa)])
+        self.assertIn("1 alice-* crate(s) from the local registry", p.stdout)
+        self.assertEqual(git("status", "--porcelain", cwd=self.app), "")
+
+    def test_a_git_and_a_path_dependency_together(self):
+        # the path sibling ALICE-Fb depends on alice-fa by path; alice-fa is this crate's git dependency, so it is the
+        # crate registered from the rev (not looked up again in the pin file)
+        self.make_app(f'alice-fa = {{ git = "{self.GIT_FA}", rev = "{self.fa}", version = "0.2" }}\n'
+                      'alice-fb = { path = "../ALICE-Fb", version = "0.3" }\n', f"ALICE-Fb {self.fb}\n")
+        p = self.run_script()
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertEqual(sorted(n for n, *_ in LINE.findall(p.stdout)), ["alice-fa", "alice-fb"])
+
+    def test_a_git_dependency_not_pinned_by_a_full_rev_exits_2(self):
+        for pin in ('branch = "main"', f'rev = "{self.fa[:7]}"'):
+            with self.subTest(pin=pin):
+                shutil.rmtree(self.app, ignore_errors=True)
+                self.make_app(f'alice-fa = {{ git = "{self.GIT_FA}", {pin}, version = "0.2" }}\n', None)
+                p = self.run_script()
+                self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+                self.assertIn("40-hex rev", p.stderr)
 
     def test_a_malformed_pin_exits_2(self) -> None:
         self.make_app('alice-fb = { path = "../ALICE-Fb", version = "0.3" }\n', "ALICE-Fb abc\n")
