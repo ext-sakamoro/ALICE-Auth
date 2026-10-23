@@ -5,7 +5,7 @@ use alice_auth::{
     approve_recovery, check, check_timed, ct_eq, ct_eq_n, endorse, make_challenge,
     make_timed_challenge, ok, rand, respond, verify, verify_chain, verify_endorsement,
     verify_recovery_approval, AliceId, AliceSig, AuthError, AuthResult, Challenge, Identity,
-    Pending, CHALLENGE_TTL_MS,
+    Pending, RecoveryRequest, CHALLENGE_TTL_MS,
 };
 
 // ============================================================================
@@ -367,7 +367,11 @@ fn recovery_approval_timestamp_preserved() {
     let guardian = Identity::gen().unwrap();
     let old = Identity::gen().unwrap();
     let new = Identity::gen().unwrap();
-    let approval = approve_recovery(&guardian, &old.id(), &new.id(), 42_000);
+    let approval = approve_recovery(
+        &guardian,
+        &RecoveryRequest::with_nonce(old.id(), new.id(), [0; 16], 0),
+        42_000,
+    );
     assert_eq!(approval.approved_ms, 42_000);
 }
 
@@ -376,7 +380,11 @@ fn recovery_approval_tampered_old_id_fails() {
     let guardian = Identity::gen().unwrap();
     let old = Identity::gen().unwrap();
     let new = Identity::gen().unwrap();
-    let mut approval = approve_recovery(&guardian, &old.id(), &new.id(), 1000);
+    let mut approval = approve_recovery(
+        &guardian,
+        &RecoveryRequest::with_nonce(old.id(), new.id(), [0; 16], 0),
+        1000,
+    );
     approval.old_id = AliceId::new([0x77; 32]);
     assert!(!verify_recovery_approval(&approval));
 }
@@ -387,7 +395,11 @@ fn recovery_approval_tampered_guardian_fails() {
     let impersonator = Identity::gen().unwrap();
     let old = Identity::gen().unwrap();
     let new = Identity::gen().unwrap();
-    let mut approval = approve_recovery(&guardian, &old.id(), &new.id(), 1000);
+    let mut approval = approve_recovery(
+        &guardian,
+        &RecoveryRequest::with_nonce(old.id(), new.id(), [0; 16], 0),
+        1000,
+    );
     approval.guardian = impersonator.id();
     assert!(!verify_recovery_approval(&approval));
 }

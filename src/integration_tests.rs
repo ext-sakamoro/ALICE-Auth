@@ -598,7 +598,11 @@ fn recovery_approval_basic() {
     let guardian = Identity::gen().unwrap();
     let old = Identity::gen().unwrap();
     let new = Identity::gen().unwrap();
-    let approval = approve_recovery(&guardian, &old.id(), &new.id(), 1000);
+    let approval = approve_recovery(
+        &guardian,
+        &RecoveryRequest::with_nonce(old.id(), new.id(), [0; 16], 0),
+        1000,
+    );
     assert!(verify_recovery_approval(&approval));
     assert_eq!(approval.guardian, guardian.id());
     assert_eq!(approval.old_id, old.id());
@@ -610,7 +614,11 @@ fn recovery_approval_tampered_fails() {
     let guardian = Identity::gen().unwrap();
     let old = Identity::gen().unwrap();
     let new = Identity::gen().unwrap();
-    let mut approval = approve_recovery(&guardian, &old.id(), &new.id(), 1000);
+    let mut approval = approve_recovery(
+        &guardian,
+        &RecoveryRequest::with_nonce(old.id(), new.id(), [0; 16], 0),
+        1000,
+    );
     // Tamper with new_id
     approval.new_id = AliceId::new([0xFF; 32]);
     assert!(!verify_recovery_approval(&approval));
@@ -631,12 +639,26 @@ mod recovery_validate_tests {
         let config = RecoveryConfig {
             guardians: vec![g1.id(), g2.id(), g3.id()],
             threshold: 2,
+            max_age_ms: 60_000,
         };
 
-        let a1 = approve_recovery(&g1, &old.id(), &new.id(), 1000);
-        let a2 = approve_recovery(&g2, &old.id(), &new.id(), 2000);
+        let a1 = approve_recovery(
+            &g1,
+            &RecoveryRequest::with_nonce(old.id(), new.id(), [0; 16], 0),
+            1000,
+        );
+        let a2 = approve_recovery(
+            &g2,
+            &RecoveryRequest::with_nonce(old.id(), new.id(), [0; 16], 0),
+            2000,
+        );
 
-        assert!(validate_recovery(&config, &old.id(), &new.id(), &[a1, a2],));
+        assert!(validate_recovery(
+            &config,
+            &RecoveryRequest::with_nonce(old.id(), new.id(), [0; 16], 0),
+            &[a1, a2],
+            10_000
+        ));
     }
 
     #[test]
@@ -649,11 +671,21 @@ mod recovery_validate_tests {
         let config = RecoveryConfig {
             guardians: vec![g1.id(), g2.id()],
             threshold: 2,
+            max_age_ms: 60_000,
         };
 
-        let a1 = approve_recovery(&g1, &old.id(), &new.id(), 1000);
+        let a1 = approve_recovery(
+            &g1,
+            &RecoveryRequest::with_nonce(old.id(), new.id(), [0; 16], 0),
+            1000,
+        );
         // Only 1 approval, need 2
-        assert!(!validate_recovery(&config, &old.id(), &new.id(), &[a1],));
+        assert!(!validate_recovery(
+            &config,
+            &RecoveryRequest::with_nonce(old.id(), new.id(), [0; 16], 0),
+            &[a1],
+            10_000
+        ));
     }
 
     #[test]
@@ -666,11 +698,21 @@ mod recovery_validate_tests {
         let config = RecoveryConfig {
             guardians: vec![g1.id()],
             threshold: 1,
+            max_age_ms: 60_000,
         };
 
         // Stranger's approval should not count
-        let a = approve_recovery(&stranger, &old.id(), &new.id(), 1000);
-        assert!(!validate_recovery(&config, &old.id(), &new.id(), &[a],));
+        let a = approve_recovery(
+            &stranger,
+            &RecoveryRequest::with_nonce(old.id(), new.id(), [0; 16], 0),
+            1000,
+        );
+        assert!(!validate_recovery(
+            &config,
+            &RecoveryRequest::with_nonce(old.id(), new.id(), [0; 16], 0),
+            &[a],
+            10_000
+        ));
     }
 
     #[test]
@@ -678,12 +720,13 @@ mod recovery_validate_tests {
         let config = RecoveryConfig {
             guardians: vec![],
             threshold: 0,
+            max_age_ms: 60_000,
         };
         assert!(!validate_recovery(
             &config,
-            &AliceId::new([0; 32]),
-            &AliceId::new([1; 32]),
+            &RecoveryRequest::with_nonce(AliceId::new([0; 32]), AliceId::new([1; 32]), [0; 16], 0),
             &[],
+            10_000,
         ));
     }
 
@@ -696,16 +739,25 @@ mod recovery_validate_tests {
         let config = RecoveryConfig {
             guardians: vec![g1.id()],
             threshold: 2,
+            max_age_ms: 60_000,
         };
 
         // Same guardian approves twice — should count as 1, not 2
-        let a1 = approve_recovery(&g1, &old.id(), &new_id.id(), 1000);
-        let a2 = approve_recovery(&g1, &old.id(), &new_id.id(), 2000);
+        let a1 = approve_recovery(
+            &g1,
+            &RecoveryRequest::with_nonce(old.id(), new_id.id(), [0; 16], 0),
+            1000,
+        );
+        let a2 = approve_recovery(
+            &g1,
+            &RecoveryRequest::with_nonce(old.id(), new_id.id(), [0; 16], 0),
+            2000,
+        );
         assert!(!validate_recovery(
             &config,
-            &old.id(),
-            &new_id.id(),
+            &RecoveryRequest::with_nonce(old.id(), new_id.id(), [0; 16], 0),
             &[a1, a2],
+            10_000
         ));
     }
 } // mod recovery_validate_tests

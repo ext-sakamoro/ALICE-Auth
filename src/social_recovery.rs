@@ -8,22 +8,78 @@ use core::fmt;
 // Social Recovery (Guardian-based Key Migration)
 // ============================================================================
 
-/// Configuration for social recovery: a set of guardian identities and
-/// the minimum number of approvals needed to authorize key migration.
+/// The domain tag of an approval's signed bytes (24 bytes, under the reserved `alice-auth/` prefix).
+pub const TAG_RECOVERY_V2: &[u8; 24] = b"alice-auth/recover/v2///";
+
+/// Length of the bytes a guardian signs: tag (24) || old (32) || new (32) || nonce (16) || issued (8) ||
+/// approved (8).
+const APPROVAL_SIGNED_LEN: usize = 24 + 32 + 32 + 16 + 8 + 8;
+
+/// Configuration for social recovery: the guardian identities, how many approvals authorize a key migration, and
+/// how long a recovery request stays good.
 #[cfg(feature = "std")]
 #[derive(Clone)]
 pub struct RecoveryConfig {
     pub guardians: Vec<AliceId>,
     pub threshold: u8,
+    /// A request is refused once more than this many milliseconds have passed since it was issued.
+    pub max_age_ms: u64,
 }
 
-/// A guardian's approval for migrating from `old_id` to `new_id`.
+/// One request to move `old_id` to `new_id`, made by whoever starts the recovery and shown to the guardians.
+///
+/// The random `nonce` makes every request distinct: a guardian's approval is for this request only, so approvals
+/// collected for an earlier recovery of the same pair cannot be counted again.
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub struct RecoveryRequest {
+    pub old_id: AliceId,
+    pub new_id: AliceId,
+    pub nonce: [u8; 16],
+    pub issued_ms: u64,
+}
+
+impl RecoveryRequest {
+    /// A request issued at `issued_ms` with a random nonce.
+    ///
+    /// # Errors
+    ///
+    /// `AuthError::E5` if the platform RNG fails.
+    pub fn new(old_id: AliceId, new_id: AliceId, issued_ms: u64) -> crate::errors::Result<Self> {
+        Ok(Self::with_nonce(
+            old_id,
+            new_id,
+            crate::random::rand()?,
+            issued_ms,
+        ))
+    }
+
+    /// A request with a given nonce (a test, or a nonce drawn elsewhere: it must not repeat).
+    #[must_use]
+    pub const fn with_nonce(
+        old_id: AliceId,
+        new_id: AliceId,
+        nonce: [u8; 16],
+        issued_ms: u64,
+    ) -> Self {
+        Self {
+            old_id,
+            new_id,
+            nonce,
+            issued_ms,
+        }
+    }
+}
+
+/// A guardian's approval of one [`RecoveryRequest`].
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct RecoveryApproval {
     pub guardian: AliceId,
     pub old_id: AliceId,
     pub new_id: AliceId,
+    pub nonce: [u8; 16],
+    pub issued_ms: u64,
     pub sig: AliceSig,
     pub approved_ms: u64,
 }
@@ -36,61 +92,75 @@ impl fmt::Debug for RecoveryApproval {
 }
 
 impl RecoveryApproval {
-    /// Serialize the recovery payload that gets signed:
-    /// "recover" || `old_id(32)` || `new_id(32)` || timestamp(8) = 79 bytes
-    fn payload(old_id: &AliceId, new_id: &AliceId, approved_ms: u64) -> [u8; 79] {
-        let mut buf = [0u8; 79];
-        buf[0..7].copy_from_slice(b"recover");
-        buf[7..39].copy_from_slice(old_id.as_bytes());
-        buf[39..71].copy_from_slice(new_id.as_bytes());
-        buf[71..79].copy_from_slice(&approved_ms.to_le_bytes());
+    /// The bytes a guardian signs: [`TAG_RECOVERY_V2`] || old (32) || new (32) || nonce (16) || `issued_ms` (u64
+    /// LE) || `approved_ms` (u64 LE), 120 bytes.
+    fn signed_bytes(request: &RecoveryRequest, approved_ms: u64) -> [u8; APPROVAL_SIGNED_LEN] {
+        let mut buf = [0u8; APPROVAL_SIGNED_LEN];
+        buf[0..24].copy_from_slice(TAG_RECOVERY_V2);
+        buf[24..56].copy_from_slice(request.old_id.as_bytes());
+        buf[56..88].copy_from_slice(request.new_id.as_bytes());
+        buf[88..104].copy_from_slice(&request.nonce);
+        buf[104..112].copy_from_slice(&request.issued_ms.to_le_bytes());
+        buf[112..120].copy_from_slice(&approved_ms.to_le_bytes());
         buf
+    }
+
+    /// The request this approval is for.
+    #[must_use]
+    pub const fn request(&self) -> RecoveryRequest {
+        RecoveryRequest::with_nonce(self.old_id, self.new_id, self.nonce, self.issued_ms)
     }
 }
 
-/// Guardian signs an approval for key migration.
+/// A guardian approves `request` at `now_ms`.
 ///
-/// The guardian vouches that `old_id` should be replaced by `new_id`.
+/// The guardian vouches that `request.old_id` should be replaced by `request.new_id`, for this request only.
 #[must_use]
 pub fn approve_recovery(
     guardian: &Identity,
-    old_id: &AliceId,
-    new_id: &AliceId,
+    request: &RecoveryRequest,
     now_ms: u64,
 ) -> RecoveryApproval {
-    let payload = RecoveryApproval::payload(old_id, new_id, now_ms);
+    let signed = RecoveryApproval::signed_bytes(request, now_ms);
     RecoveryApproval {
         guardian: guardian.id(),
-        old_id: *old_id,
-        new_id: *new_id,
-        sig: guardian.sign_reserved(&payload),
+        old_id: request.old_id,
+        new_id: request.new_id,
+        nonce: request.nonce,
+        issued_ms: request.issued_ms,
+        sig: guardian.sign_reserved(&signed),
         approved_ms: now_ms,
     }
 }
 
-/// Verify a single guardian's recovery approval.
+/// Whether the approval's signature is its guardian's, over its request and time.
 #[must_use]
 pub fn verify_recovery_approval(approval: &RecoveryApproval) -> bool {
-    let payload =
-        RecoveryApproval::payload(&approval.old_id, &approval.new_id, approval.approved_ms);
-    ok(&approval.guardian, &payload, &approval.sig)
+    let signed = RecoveryApproval::signed_bytes(&approval.request(), approval.approved_ms);
+    ok(&approval.guardian, &signed, &approval.sig)
 }
 
-/// Validate a complete recovery request against a config.
+/// Validate a recovery request at `now_ms` against a config.
 ///
 /// Returns true if:
-/// 1. At least `threshold` valid approvals from registered guardians
-/// 2. All approvals agree on the same `old_id` and `new_id`
-/// 3. All signatures verify correctly
+/// 1. the request is still good: `now_ms` is not before it was issued and at most `config.max_age_ms` after
+/// 2. at least `threshold` approvals are for this exact request (same old, new, nonce and issue time), from
+///    distinct registered guardians, dated from the issue time to `now_ms`, with valid signatures
 #[cfg(feature = "std")]
 #[must_use]
 pub fn validate_recovery(
     config: &RecoveryConfig,
-    old_id: &AliceId,
-    new_id: &AliceId,
+    request: &RecoveryRequest,
     approvals: &[RecoveryApproval],
+    now_ms: u64,
 ) -> bool {
     if config.threshold == 0 || config.guardians.is_empty() {
+        return false;
+    }
+    let Some(age) = now_ms.checked_sub(request.issued_ms) else {
+        return false;
+    };
+    if age > config.max_age_ms {
         return false;
     }
 
@@ -98,8 +168,12 @@ pub fn validate_recovery(
     let mut seen_guardians = Vec::new();
 
     for approval in approvals {
-        // Must match the target migration
-        if approval.old_id != *old_id || approval.new_id != *new_id {
+        // Must be for this request: an approval of another request (even of the same pair) is a replay
+        if approval.request() != *request {
+            continue;
+        }
+        // Must be dated within the request's time so far
+        if approval.approved_ms < request.issued_ms || approval.approved_ms > now_ms {
             continue;
         }
         // Must be a registered guardian

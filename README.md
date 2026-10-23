@@ -454,14 +454,18 @@ let session_key = derive_session_key(&id_a, &id_b, &shared_secret);
 ### Social Recovery (feature: `std`)
 
 Guardian-based key migration. A threshold of trusted guardians can authorize migrating to a new identity.
+Guardians approve one recovery request (old and new identity, a random nonce, the time it was issued), so an
+approval collected for one recovery is never counted for another, and a request is refused once it is older than
+`max_age_ms`.
 
 ```rust
-use alice_auth::{RecoveryConfig, approve_recovery, validate_recovery};
+use alice_auth::{RecoveryConfig, RecoveryRequest, approve_recovery, validate_recovery};
 
-let config = RecoveryConfig { guardians: vec![g1.id(), g2.id(), g3.id()], threshold: 2 };
-let approval1 = approve_recovery(&g1, &old_id, &new_id, now_ms);
-let approval2 = approve_recovery(&g2, &old_id, &new_id, now_ms);
-assert!(validate_recovery(&config, &old_id, &new_id, &[approval1, approval2]));
+let config = RecoveryConfig { guardians: vec![g1.id(), g2.id(), g3.id()], threshold: 2, max_age_ms: 86_400_000 };
+let request = RecoveryRequest::new(old_id, new_id, now_ms)?; // shown to the guardians
+let approval1 = approve_recovery(&g1, &request, now_ms);
+let approval2 = approve_recovery(&g2, &request, now_ms);
+assert!(validate_recovery(&config, &request, &[approval1, approval2], now_ms));
 ```
 
 ### Challenge TTL (feature: `std`)

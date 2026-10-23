@@ -157,6 +157,8 @@ fn a_recovery_approval_by_the_small_order_key_is_refused() {
         guardian: id(IDENTITY),
         old_id: id(KEY),
         new_id: Identity::from_seed(&[8u8; 32]).id(),
+        nonce: [0; 16],
+        issued_ms: 0,
         sig: sig(ANY_MESSAGE),
         approved_ms: 1,
     };
