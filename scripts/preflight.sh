@@ -139,6 +139,10 @@ step "crypto-features.yml / crypto and nizk against the real ALICE-Crypto at .gi
 python3 scripts/test_crypto_features.py
 ( export RUSTFLAGS="-Dwarnings"; scripts/crypto_features.sh )
 
+step "security-audit.yml / package-integrity: cargo package against the local registry of the pinned siblings"
+python3 scripts/test_alice_local_registry.py
+python3 scripts/alice_local_registry.py
+
 step "public-text.yml / public text (the ALICE-Law checker at .github/public-text-pin)"
 python3 scripts/test_public_text.py
 scripts/public_text.sh

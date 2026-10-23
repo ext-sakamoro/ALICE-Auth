@@ -13,7 +13,9 @@ given with --sibling-src, so nothing is fetched from GitHub.
 - the transitive sibling unpinned exits 2 naming it and who needs it;
 - a pinned version that does not satisfy the requirement exits 1 with cargo's message;
 - no alice-* path dependency, and a malformed pin, exit 2;
+- a registry directory it did not make is refused and left alone;
 - two runs give the same checksums (the .crate of a commit is reproducible);
+- a problem the lock check reports fails the run;
 - the lock check rejects an alice-* package from crates.io, a checksum that is not the
   .crate built here, and a registered crate missing from the lock.
 
@@ -123,6 +125,31 @@ class LocalRegistry(unittest.TestCase):
         p = self.run_script()
         self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
         self.assertIn("no alice-* path dependency", p.stderr)
+
+    def test_a_registry_dir_it_did_not_make_is_refused(self) -> None:
+        self.make_app('alice-fb = { path = "../ALICE-Fb", version = "0.3" }\n', self.both_pins())
+        foreign = Path("/tmp/alice-local-registry/ALICE-App")
+        shutil.rmtree(foreign, ignore_errors=True)
+        foreign.mkdir(parents=True)
+        (foreign / "keep").write_text("not the script's\n")
+        self.addCleanup(shutil.rmtree, foreign, True)
+        p = self.run_script()
+        self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+        self.assertIn("was not made by this script", p.stderr)
+        self.assertTrue((foreign / "keep").is_file())
+
+    def test_a_lock_problem_fails_the_run(self) -> None:
+        # the run must act on the lock check, not only compute it
+        self.make_app('alice-fb = { path = "../ALICE-Fb", version = "0.3" }\n', self.both_pins())
+        mod = load_script()
+        mod.lock_problems = lambda *a: ["alice-fb comes from somewhere else"]
+        cwd = Path.cwd()
+        os.chdir(self.app)
+        self.addCleanup(os.chdir, cwd)
+        with self.assertRaises(mod.Failed) as e:
+            mod.main(["--sibling-src", f"ALICE-Fa={self.tmp / 'ALICE-Fa'}",
+                      "--sibling-src", f"ALICE-Fb={self.tmp / 'ALICE-Fb'}"])
+        self.assertIn("alice-fb comes from somewhere else", str(e.exception))
 
     def test_a_malformed_pin_exits_2(self) -> None:
         self.make_app('alice-fb = { path = "../ALICE-Fb", version = "0.3" }\n', "ALICE-Fb abc\n")

@@ -18,6 +18,9 @@ on:
       - 'deny.toml'
       - '.github/workflows/security-audit.yml'
       - '.github/actions/**'
+      - '.github/alice-siblings'
+      - 'scripts/alice_local_registry.py'
+      - 'scripts/test_alice_local_registry.py'
       - 'bindings/*/Cargo.toml'
       - 'bindings/*/*/Cargo.toml'
   pull_request:
@@ -29,6 +32,9 @@ on:
       - 'deny.toml'
       - '.github/workflows/security-audit.yml'
       - '.github/actions/**'
+      - '.github/alice-siblings'
+      - 'scripts/alice_local_registry.py'
+      - 'scripts/test_alice_local_registry.py'
       - 'bindings/*/Cargo.toml'
       - 'bindings/*/*/Cargo.toml'
   schedule:
@@ -157,10 +163,9 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
 
-      # sibling path dep があるので cargo package の metadata 解決に stub が要る
-      # (stub が必要なのは package step だけ 展開後の .crate では path dep が
-      #  crates.io の version 要求に置き換わるので、隔離 build は実物を引く
-      #  = 宣言した version 要求が publish 済 version と噛み合うかまで検査される)
+      # sibling path dep があるので、この checkout の cargo metadata (alice-* の path 依存を
+      # 読む) に stub が要る package と隔離 build は、pin した commit から作る local registry の
+      # 実物を引く (= 宣言した version 要求が pin した sibling の version と噛み合うかまで検査される)
       - name: Create ALICE optional bridge stubs
         uses: ./.github/actions/alice-stubs
 
@@ -170,22 +175,16 @@ jobs:
       # 必要 file が漏れる — これらは repo / workspace に file がある限り
       # cargo build も cargo test も clippy も preflight も全部通り、
       # crates.io から取得した利用者だけが compile 不能になる
-      - name: cargo package (.crate を作る)
-        run: cargo package --no-verify --allow-dirty
+      #
+      # alice-* の sibling は crates.io の公開版でなく .github/alice-siblings の commit から
+      # 作る local registry で解決する (版の整合は repo の中で保つ、他の crate は crates.io)
+      # commit 済みの tree を package し、展開した .crate を単独で build する
+      # packaged Cargo.lock の alice-* が全て local registry 由来で checksum が一致することを確かめる
+      - name: Tests of scripts/alice_local_registry.py
+        run: python3 scripts/test_alice_local_registry.py
 
-      - name: 展開して隔離 build
-        run: |
-          set -euo pipefail
-          crate=$(find target/package -maxdepth 1 -name '*.crate' | head -1)
-          [ -n "$crate" ] || { echo "::error::.crate が生成されていない"; exit 1; }
-          echo "packaged: $(basename "$crate") ($(du -h "$crate" | cut -f1))"
-          tmp=$(mktemp -d)
-          tar xzf "$crate" -C "$tmp"
-          cd "$tmp"/*/
-          # 親 workspace を継承すると member 扱いになり、境界を越えた file が
-          # 再び見えてしまう (検査の意味が消える) ので単独 package として build
-          printf '\n[workspace]\n' >> Cargo.toml
-          cargo check --all-features
+      - name: cargo package (local registry の alice-*) と展開した .crate の隔離 build
+        run: python3 scripts/alice_local_registry.py
 
   coverage:
     name: Coverage (cargo-llvm-cov、informational)
