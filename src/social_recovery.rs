@@ -30,7 +30,7 @@ pub struct RecoveryConfig {
 ///
 /// The random `nonce` makes every request distinct: a guardian's approval is for this request only, so approvals
 /// collected for an earlier recovery of the same pair cannot be counted again.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(C)]
 pub struct RecoveryRequest {
     pub old_id: AliceId,
@@ -140,28 +140,111 @@ pub fn verify_recovery_approval(approval: &RecoveryApproval) -> bool {
     ok(&approval.guardian, &signed, &approval.sig)
 }
 
+/// A recovery the guardians approved: the request it was for, and how many approvals counted.
+///
+/// The caller must record `request().nonce` as consumed once it has migrated the identity, and must refuse a
+/// request whose nonce it has already consumed: the approvals of one request stay valid until the request expires,
+/// so without the record the same approvals could migrate the identity again within that time.
+#[cfg(feature = "std")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApprovedRecovery {
+    request: RecoveryRequest,
+    approvals: u8,
+}
+
+#[cfg(feature = "std")]
+impl ApprovedRecovery {
+    /// The request that was approved (its nonce is the one to record as consumed).
+    #[must_use]
+    pub const fn request(&self) -> &RecoveryRequest {
+        &self.request
+    }
+
+    /// How many distinct registered guardians' valid approvals counted.
+    #[must_use]
+    pub const fn approvals(&self) -> u8 {
+        self.approvals
+    }
+}
+
+/// Why `validate_recovery` refused a recovery.
+#[cfg(feature = "std")]
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecoveryError {
+    /// The configuration names no guardian, or a threshold of 0.
+    NotConfigured,
+    /// `now_ms` is before the request was issued.
+    NotYetIssued,
+    /// The request is older than the configuration allows.
+    Expired { age_ms: u64, max_age_ms: u64 },
+    /// Fewer valid approvals for this request than the threshold.
+    NotEnoughApprovals { valid: u8, needed: u8 },
+}
+
+#[cfg(feature = "std")]
+impl fmt::Display for RecoveryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotConfigured => {
+                f.write_str("the recovery configuration names no guardian or a threshold of 0")
+            }
+            Self::NotYetIssued => f.write_str("the recovery request is dated after now"),
+            Self::Expired { age_ms, max_age_ms } => {
+                write!(
+                    f,
+                    "the recovery request is {age_ms} ms old, more than {max_age_ms} ms"
+                )
+            }
+            Self::NotEnoughApprovals { valid, needed } => {
+                write!(
+                    f,
+                    "{valid} valid approval(s) for this request, {needed} needed"
+                )
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for RecoveryError {}
+
 /// Validate a recovery request at `now_ms` against a config.
 ///
-/// Returns true if:
-/// 1. the request is still good: `now_ms` is not before it was issued and at most `config.max_age_ms` after
-/// 2. at least `threshold` approvals are for this exact request (same old, new, nonce and issue time), from
-///    distinct registered guardians, dated from the issue time to `now_ms`, with valid signatures
+/// Approves when the request is still good (`now_ms` is not before it was issued and at most `config.max_age_ms`
+/// after) and at least `threshold` approvals are for this exact request (same old, new, nonce and issue time),
+/// from distinct registered guardians, dated from the issue time to `now_ms`, with valid signatures.
+///
+/// Clocks: there is no tolerance for skew. An approval dated later than `now_ms` is not counted, and a request
+/// dated later than `now_ms` is refused, so `now_ms` should come from a clock that is not behind the guardians' and
+/// the requester's. A caller that accepts some skew passes `now_ms` plus that amount, and sets `max_age_ms` with it
+/// in mind.
+///
+/// Replay: approvals collected for one request never count for another (the request's random nonce is signed),
+/// but they stay valid for the same request until it expires. Record the approved request's nonce as consumed
+/// (see [`ApprovedRecovery`]).
+///
+/// # Errors
+///
+/// [`RecoveryError`] says why the recovery was refused.
 #[cfg(feature = "std")]
-#[must_use]
 pub fn validate_recovery(
     config: &RecoveryConfig,
     request: &RecoveryRequest,
     approvals: &[RecoveryApproval],
     now_ms: u64,
-) -> bool {
+) -> Result<ApprovedRecovery, RecoveryError> {
     if config.threshold == 0 || config.guardians.is_empty() {
-        return false;
+        return Err(RecoveryError::NotConfigured);
     }
     let Some(age) = now_ms.checked_sub(request.issued_ms) else {
-        return false;
+        return Err(RecoveryError::NotYetIssued);
     };
     if age > config.max_age_ms {
-        return false;
+        return Err(RecoveryError::Expired {
+            age_ms: age,
+            max_age_ms: config.max_age_ms,
+        });
     }
 
     let mut valid_count: u8 = 0;
@@ -192,5 +275,15 @@ pub fn validate_recovery(
         valid_count = valid_count.saturating_add(1);
     }
 
-    valid_count >= config.threshold
+    if valid_count >= config.threshold {
+        Ok(ApprovedRecovery {
+            request: *request,
+            approvals: valid_count,
+        })
+    } else {
+        Err(RecoveryError::NotEnoughApprovals {
+            valid: valid_count,
+            needed: config.threshold,
+        })
+    }
 }

@@ -658,7 +658,8 @@ mod recovery_validate_tests {
             &RecoveryRequest::with_nonce(old.id(), new.id(), [0; 16], 0),
             &[a1, a2],
             10_000
-        ));
+        )
+        .is_ok());
     }
 
     #[test]
@@ -680,12 +681,13 @@ mod recovery_validate_tests {
             1000,
         );
         // Only 1 approval, need 2
-        assert!(!validate_recovery(
+        assert!(validate_recovery(
             &config,
             &RecoveryRequest::with_nonce(old.id(), new.id(), [0; 16], 0),
             &[a1],
             10_000
-        ));
+        )
+        .is_err());
     }
 
     #[test]
@@ -707,12 +709,13 @@ mod recovery_validate_tests {
             &RecoveryRequest::with_nonce(old.id(), new.id(), [0; 16], 0),
             1000,
         );
-        assert!(!validate_recovery(
+        assert!(validate_recovery(
             &config,
             &RecoveryRequest::with_nonce(old.id(), new.id(), [0; 16], 0),
             &[a],
             10_000
-        ));
+        )
+        .is_err());
     }
 
     #[test]
@@ -722,12 +725,13 @@ mod recovery_validate_tests {
             threshold: 0,
             max_age_ms: 60_000,
         };
-        assert!(!validate_recovery(
+        assert!(validate_recovery(
             &config,
             &RecoveryRequest::with_nonce(AliceId::new([0; 32]), AliceId::new([1; 32]), [0; 16], 0),
             &[],
             10_000,
-        ));
+        )
+        .is_err());
     }
 
     #[test]
@@ -753,11 +757,12 @@ mod recovery_validate_tests {
             &RecoveryRequest::with_nonce(old.id(), new_id.id(), [0; 16], 0),
             2000,
         );
-        assert!(!validate_recovery(
+        assert!(validate_recovery(
             &config,
             &RecoveryRequest::with_nonce(old.id(), new_id.id(), [0; 16], 0),
             &[a1, a2],
             10_000
-        ));
+        )
+        .is_err());
     }
 } // mod recovery_validate_tests

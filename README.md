@@ -456,7 +456,8 @@ let session_key = derive_session_key(&id_a, &id_b, &shared_secret);
 Guardian-based key migration. A threshold of trusted guardians can authorize migrating to a new identity.
 Guardians approve one recovery request (old and new identity, a random nonce, the time it was issued), so an
 approval collected for one recovery is never counted for another, and a request is refused once it is older than
-`max_age_ms`.
+`max_age_ms`. `validate_recovery` returns the approved request (whose nonce the caller records as consumed) or a
+`RecoveryError` saying why it refused; it allows no clock skew (an approval dated after `now_ms` does not count).
 
 ```rust
 use alice_auth::{RecoveryConfig, RecoveryRequest, approve_recovery, validate_recovery};
@@ -465,7 +466,9 @@ let config = RecoveryConfig { guardians: vec![g1.id(), g2.id(), g3.id()], thresh
 let request = RecoveryRequest::new(old_id, new_id, now_ms)?; // shown to the guardians
 let approval1 = approve_recovery(&g1, &request, now_ms);
 let approval2 = approve_recovery(&g2, &request, now_ms);
-assert!(validate_recovery(&config, &request, &[approval1, approval2], now_ms));
+let approved = validate_recovery(&config, &request, &[approval1, approval2], now_ms)?;
+// record the nonce as consumed after the migration, and refuse a request whose nonce was consumed
+store_consumed_nonce(approved.request().nonce);
 ```
 
 ### Challenge TTL (feature: `std`)
