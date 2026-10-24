@@ -2,7 +2,7 @@
 // Ed25519 ZKP authentication via P/Invoke (C-ABI FFI)
 //
 // Author: Moroya Sakamoto
-// License: AGPL-3.0
+// License: LicenseRef-Proprietary
 //
 // Usage:
 //   1. Build alice-auth as cdylib: cargo build --release --features "ffi,nizk"

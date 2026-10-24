@@ -15,6 +15,7 @@ All notable changes to ALICE-Auth will be documented in this file.
 - README: FFI の関数の数 (28 → 45、変更の前から 32 あった)、Python・Unity・UE5 の数、試験の数を実数に直した
 
 ### Changed
+- Licence: from `AGPL-3.0-or-later OR LicenseRef-Commercial` to `LicenseRef-Proprietary` from this version (the source stays published for reading; using it needs a written agreement); published versions keep their licence
 - 版を 0.6.0 に上げた (social recovery の API が破壊的に変わったため、crates.io には公開しない)
 - 依存: `alice-crypto` (feature `crypto`) を "0.5" から "0.6" に上げた (git の rev `eefb7bab69b8` の commit で取る、下の行) 0.6.0 は `sss::Shard` の field を private にし、`recover` が `Zeroizing<Vec<u8>>` を返し、`SssError` を `#[non_exhaustive]` にした この crate の `split_seed` / `recover_identity` は field に触れず `SssError` を match しないので code は変わらない `recover` は shard を確かめてから復元する: 閾値より少ない shard は `NotEnoughShards`、split id (split ごとの 16 byte の乱数) か閾値か長さの違う shard は `InvalidShard` で拒む (閾値と長さが同じ別の split の shard も拒む、以前は誤った bytes を返すか長さの違いで panic した)
 - 依存: `alice-crypto` を隣の checkout の path (`../ALICE-Crypto`) でなく git (`https://github.com/ext-sakamoro/ALICE-Crypto`) の 40 桁の rev `eefb7bab69b8` で取る (Cargo.lock も同じ commit) CI の空の stub (`.github/actions/alice-stubs`) と commit の pin (`.github/alice-siblings`) を消した `scripts/crypto_features.sh` は rev を Cargo.toml から読み、path・branch・tag・短い rev・別の URL なら cargo を走らせずに exit 2 で止まる (試験を足した、ALICE-Crypto を取りに行かないので試験は offline) cargo-deny の `allow-git` にその URL を足した
