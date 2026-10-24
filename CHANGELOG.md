@@ -15,7 +15,7 @@ All notable changes to ALICE-Auth will be documented in this file.
 - README: FFI の関数の数 (28 → 45、変更の前から 32 あった)、Python・Unity・UE5 の数、試験の数を実数に直した
 
 ### Changed
-- Licence: from `AGPL-3.0-or-later OR LicenseRef-Commercial` to `LicenseRef-Proprietary` from this version (the source stays published for reading; using it needs a written agreement); published versions keep their licence
+- Licence: `AGPL-3.0-or-later OR LicenseRef-Commercial` → `LicenseRef-Proprietary`
 - 版を 0.6.0 に上げた (social recovery の API が破壊的に変わったため、crates.io には公開しない)
 - 依存: `alice-crypto` (feature `crypto`) を "0.5" から "0.6" に上げた (git の rev `eefb7bab69b8` の commit で取る、下の行) 0.6.0 は `sss::Shard` の field を private にし、`recover` が `Zeroizing<Vec<u8>>` を返し、`SssError` を `#[non_exhaustive]` にした この crate の `split_seed` / `recover_identity` は field に触れず `SssError` を match しないので code は変わらない `recover` は shard を確かめてから復元する: 閾値より少ない shard は `NotEnoughShards`、split id (split ごとの 16 byte の乱数) か閾値か長さの違う shard は `InvalidShard` で拒む (閾値と長さが同じ別の split の shard も拒む、以前は誤った bytes を返すか長さの違いで panic した)
 - 依存: `alice-crypto` を隣の checkout の path (`../ALICE-Crypto`) でなく git (`https://github.com/ext-sakamoro/ALICE-Crypto`) の 40 桁の rev `eefb7bab69b8` で取る (Cargo.lock も同じ commit) CI の空の stub (`.github/actions/alice-stubs`) と commit の pin (`.github/alice-siblings`) を消した `scripts/crypto_features.sh` は rev を Cargo.toml から読み、path・branch・tag・短い rev・別の URL なら cargo を走らせずに exit 2 で止まる (試験を足した、ALICE-Crypto を取りに行かないので試験は offline) cargo-deny の `allow-git` にその URL を足した
@@ -37,7 +37,7 @@ All notable changes to ALICE-Auth will be documented in this file.
 - **Breaking** C ABI: `aa_revlist_revoke` は `int32_t` を返す (`AA_REVLIST_OK` 0 / `AA_REVLIST_ERR_NULL` -1 / `AA_REVLIST_ERR_FULL` -2、失敗時は `aa_last_error` に理由) `aa_revlist_new_with_capacity` を追加 UE5 の `FAliceRevocationList::Revoke` は `[[nodiscard]] bool` を返し、Unity の `AliceRevocationList.Revoke` は満杯で `InvalidOperationException` を投げる (どちらも容量を取る constructor を追加) Python の `RevocationList.revoke` は満杯で `RuntimeError` を投げ、`RevocationList(capacity=...)` を受ける
 - 移行: `revoke` の戻り値を確かめる (`Err` の時その token は取消されていない) 容量が足りない運用は `with_capacity` で広げるか、token の寿命で `auto_purge` を定期的に呼ぶ
 - CI: 公開する text の検査 (`.github/workflows/public-text.yml`、`scripts/public_text.sh`) を足した ALICE-Law の `scripts/public_text_check.py` を `.github/public-text-pin` の revision で取り、SHA-256 を照らしてから、HEAD の全 file (path と本文) と push した commit (message・追加行・path) を検査する 比較 0 件と読めない pin / base は失敗 試験 `scripts/test_public_text.py` (読めない pin と base、置いた note link が tree でも commit message でも検出されること、置かない tree と commit が 0 件で通ること、新しい commit が無い時は commit を読まないこと、SHA-256 が pin と違えば exit 2、pin の revision を取ること) `scripts/preflight.sh` でも走る
-- **License: `AGPL-3.0-or-later` → `AGPL-3.0-or-later OR LicenseRef-Commercial` (dual-licensed、2026-09-27)** AGPL 側の条件は変更なし (既存 AGPL 利用者への影響ゼロ)、商用という選択肢が追加されただけ SPDX が AGPL 単独だと cargo-deny / FOSSA / SBOM に「商用オプションなし」と見えるため宣言を dual に 変更点: SPDX / `LICENSE` → `LICENSE-AGPL` / `LICENSE-COMMERCIAL.md` (商用トリガー 6 条件 = クローズド製品・商用 SaaS・エッジ / ファームウェア配布・plugin 再配布・プラットフォーム NDA・保証、社内利用は AGPL 側で無償と明記) / README の選択肢表 商用窓口は法人 `contact@extoria.co.jp`
+- License: `AGPL-3.0-or-later` → `AGPL-3.0-or-later OR LicenseRef-Commercial` (2026-09-27)
 - 依存: optional の `alice-crypto` (feature `crypto` / `nizk`) の要求を `0.1` から `0.4` に上げた 以前の要求は公開中の 0.4.1 を受け取れなかった 0.4.1 で `crypto` / `nizk` / `pyo3` を build し、`crypto` / `nizk` を含む feature で試験が通ることを確かめた
 - CI: `ci/**` の branch への push でも `ci.yml` を走らせる (main を進める前に同じ commit で CI の結果を得る)
 
