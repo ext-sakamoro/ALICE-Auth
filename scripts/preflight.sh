@@ -139,6 +139,10 @@ step "crypto-features.yml / crypto and nizk against ALICE-Crypto at the rev in C
 python3 scripts/test_crypto_features.py
 ( export RUSTFLAGS="-Dwarnings"; scripts/crypto_features.sh )
 
+step "ci.yml / actionlint: changed paths tests + trigger lint"
+python3 scripts/test_changed_paths.py
+python3 scripts/changed_paths.py sync
+
 step "security-audit.yml / package-integrity: cargo package against the local registry of alice-crypto at its git rev"
 python3 scripts/test_alice_local_registry.py
 python3 scripts/alice_local_registry.py
