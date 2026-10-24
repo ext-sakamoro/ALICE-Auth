@@ -4,7 +4,7 @@ version = "0.6.0"
 # slice::as_chunks (totp.rs) が 1.88 で stable、CI msrv job で実 compile
 rust-version = "1.88"
 edition = "2021"
-authors = ["Moroya Sakamoto <sakamoro@alicelaw.net>"]
+authors = ["Moroya Sakamoto"]
 description = "Ed25519 ZKP auth for ALICE"
 license = "LicenseRef-Proprietary"
 publish = false
