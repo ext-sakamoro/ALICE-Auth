@@ -12,19 +12,6 @@ on:
     # diff from GitHub's filter and the run is skipped; the changes job below compares
     # with merge-base(origin/main) instead (patterns: .github/paths/crypto-features.txt)
     branches: [main, 'ci/**']
-  pull_request:
-    branches: [main]
-    paths:
-      - 'src/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
-      - 'scripts/crypto_features.sh'
-      - 'pyproject.toml'
-      - 'scripts/test_crypto_features.py'
-      - '.github/workflows/crypto-features.yml'
-      - 'scripts/changed_paths.py'
-      - '.github/paths/crypto-features.txt'
   workflow_dispatch:
 
 concurrency:
