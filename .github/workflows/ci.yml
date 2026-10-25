@@ -54,6 +54,8 @@ jobs:
         run: cargo clippy --all-targets -- -W clippy::pedantic -D warnings
       - name: Clippy (full native feature set)
         run: cargo clippy --features "$NATIVE_FEATURES" --all-targets -- -W clippy::pedantic -D warnings
+      - name: Clippy (all features)
+        run: cargo clippy --all-features --all-targets -- -W clippy::pedantic -D warnings
 
   no_std:
     name: no_std (host + bare-metal thumbv7em)

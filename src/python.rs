@@ -337,6 +337,9 @@ fn nizk_verify_batch(
 // Endorsement (Trust Chain with Expiry)
 // ============================================================================
 
+/// (endorser, endorsed, sig, issued_ms, expires_ms) as Python receives an endorsement
+type EndorsementTuple = (Vec<u8>, Vec<u8>, Vec<u8>, u64, u64);
+
 /// Endorse a target identity. Returns (endorser, endorsed, sig, issued_ms, expires_ms).
 #[pyfunction]
 fn endorse(
@@ -344,7 +347,7 @@ fn endorse(
     target: &PyAliceId,
     now_ms: u64,
     ttl_ms: u64,
-) -> PyResult<(Vec<u8>, Vec<u8>, Vec<u8>, u64, u64)> {
+) -> PyResult<EndorsementTuple> {
     let e = crate::endorse(&signer.inner, &target.inner, now_ms, ttl_ms).map_err(|e| {
         PyValueError::new_err(if e == crate::AuthError::E7 {
             "the target starts with the reserved prefix alice-auth/"
