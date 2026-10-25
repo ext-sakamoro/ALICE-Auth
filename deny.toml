@@ -4,7 +4,7 @@
 # ALICE-Physics の deny.toml を base に ALICE-Auth 用に調整
 #
 # ALICE-Auth 自体は LicenseRef-Proprietary (publish = false なので [licenses.private] で除外)
-# alice-crypto は ALICE-Crypto の git の 40 桁の rev で取る (AGPL-3.0-or-later、下の exceptions)
+# alice-crypto は ALICE-Crypto の git の 40 桁の rev で取る (LicenseRef-Proprietary、下の exceptions)
 
 [graph]
 all-features = false
@@ -75,10 +75,10 @@ version = "*"
 expression = "ISC"
 license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
 
-# AGPL の git 依存 (ALICE-Crypto、Cargo.toml の rev の commit)
+# git 依存の ALICE-Crypto (Cargo.toml の rev の commit、同じ owner)
 [[licenses.exceptions]]
 name = "alice-crypto"
-allow = ["AGPL-3.0", "AGPL-3.0-only", "AGPL-3.0-or-later"]
+allow = ["LicenseRef-Proprietary"]
 
 # ---------------------------------------------------------------------------
 # Bans (banned crate / duplicate / wildcard)
