@@ -54,8 +54,8 @@ dependencies = [
 
 [[package]]
 name = "alice-crypto"
-version = "0.6.0"
-source = "git+https://github.com/ext-sakamoro/ALICE-Crypto?rev=4ab0f0e6c1cba949c949add9d5aedc98e080a4be#4ab0f0e6c1cba949c949add9d5aedc98e080a4be"
+version = "0.7.0"
+source = "git+https://github.com/ext-sakamoro/ALICE-Crypto?branch=main#497e1703eb77a01d5615f4f334f886dbcab4818f"
 dependencies = [
  "aes-gcm",
  "argon2",

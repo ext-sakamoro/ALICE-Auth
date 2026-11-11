@@ -15,6 +15,7 @@ All notable changes to ALICE-Auth will be documented in this file.
 - README: FFI の関数の数 (28 → 45、変更の前から 32 あった)、Python・Unity・UE5 の数、試験の数を実数に直した
 
 ### Changed
+- 依存 `alice-crypto` (feature `crypto`) を rev 4ab0f0e (0.6) の固定から ALICE-Crypto の `branch = "main"` + version 0.7 に替えた 使う API は 0.7 でも同じで、試験は変更なし (`--all-features` 全 green)
 - CI: `fuzz.yml` の `Run fuzz target` の `continue-on-error` を外し、crash で job を red にする artifact は残す
 - Licence: `AGPL-3.0-or-later` → `LicenseRef-Proprietary`
 - 依存: `alice-crypto` の git rev を ALICE-Crypto の `4ab0f0e` に (deny の例外は `LicenseRef-Proprietary`)
