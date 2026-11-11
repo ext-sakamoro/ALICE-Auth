@@ -20,8 +20,11 @@ on:
       - 'deny.toml'
       - '.github/workflows/security-audit.yml'
       - '.github/actions/**'
-      - 'scripts/alice_local_registry.py'
-      - 'scripts/test_alice_local_registry.py'
+      - 'scripts/package_integrity.py'
+      - 'scripts/test_package_integrity.py'
+      - 'scripts/alice_siblings_check.py'
+      - 'scripts/id_move_check.py'
+      - 'scripts/release_baseline.py'
       - 'bindings/*/Cargo.toml'
       - 'bindings/*/*/Cargo.toml'
       - '.github/paths/security-audit.txt'
@@ -189,15 +192,14 @@ jobs:
       # cargo build も cargo test も clippy も preflight も全部通り、
       # crates.io から取得した利用者だけが compile 不能になる
       #
-      # alice-* は crates.io の公開版でなく Cargo.toml の git の rev の commit から作る local registry で
-      # 解決する (宣言した version 要求がその commit の版と噛み合うかまで検査される、他の crate は crates.io)
-      # commit 済みの tree を package し、展開した .crate を単独で build する
-      # packaged Cargo.lock の alice-* が全て local registry 由来で checksum が一致することを確かめる
-      - name: Tests of scripts/alice_local_registry.py
-        run: python3 scripts/test_alice_local_registry.py
+      # scripts/package_integrity.py (ALICE-Law の共有 file): package して展開した .crate を単独で build する
+      # crates.io に無い版の alice-* (git の main branch から取る alice-crypto) は blocked と名指し、
+      # Cargo.lock が解決した commit を patch して build する (比較 0 件・.crate 0 件は失敗)
+      - name: Tests of scripts/package_integrity.py
+        run: python3 scripts/test_package_integrity.py
 
-      - name: cargo package (local registry の alice-*) と展開した .crate の隔離 build
-        run: python3 scripts/alice_local_registry.py
+      - name: cargo package と展開した .crate の隔離 build
+        run: python3 scripts/package_integrity.py --expect-in-lock alice-crypto
 
   coverage:
     needs: changes

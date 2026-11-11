@@ -1,10 +1,10 @@
 name: Crypto features
 
 # The `crypto` / `nizk` features (and the `pyo3` binding that enables them) depend on
-# ALICE-Crypto, taken by git at the 40-hex rev in Cargo.toml. This job builds and tests them
-# against that commit (scripts/crypto_features.sh, also run by scripts/preflight.sh). It fails
-# when alice-crypto is not taken that way, when the requirement no longer resolves to that
-# crate and when no `nizk::` or `crypto_bridge::` test ran.
+# ALICE-Crypto, taken by git from its main branch (Cargo.toml) at the commit the committed Cargo.lock
+# resolved. This job builds and tests them against that commit (scripts/crypto_features.sh, also run
+# by scripts/preflight.sh). It fails when alice-crypto is not taken that way, when the requirement no
+# longer resolves to that crate and when no `nizk::` or `crypto_bridge::` test ran.
 
 on:
   push:
@@ -69,7 +69,7 @@ jobs:
           --patterns-file .github/paths/crypto-features.txt
 
   crypto-features:
-    name: Crypto features (ALICE-Crypto at the rev in Cargo.toml)
+    name: Crypto features (ALICE-Crypto at the commit in Cargo.lock)
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest

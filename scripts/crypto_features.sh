@@ -3,10 +3,12 @@
 # each of `crypto`, `nizk`, `pyo3` on its own, and the Python wheel's feature set) against
 # the real ALICE-Crypto, at the commit Cargo.toml takes it from.
 #
-# ALICE-Crypto is a git dependency: `git = "https://github.com/ext-sakamoro/ALICE-Crypto"` at a
-# 40-hex `rev` (the rev is the pin; Cargo.lock records the same commit and `--locked` refuses a
-# lock that differs). Anything else (a path, a branch, a tag, a short rev, another URL) exits 2
-# before cargo runs, so the features are always built against the one commit the manifest names.
+# ALICE-Crypto is a git dependency on its main branch: `git = "https://github.com/ext-sakamoro/ALICE-Crypto"`,
+# `branch = "main"` and a version, with no `rev` or `tag`. The commit is the one the committed Cargo.lock
+# resolved (`git+https://github.com/ext-sakamoro/ALICE-Crypto?branch=main#<40 hex>`, exactly one
+# alice-crypto package), and `--locked` keeps it. Anything else (a path, a rev or tag pin, another branch,
+# another URL, no lock entry or two of them) exits 2 before cargo runs, so the features are always built
+# against the one commit the lock names.
 #
 # It builds the committed tree (HEAD) in a temporary directory, so the result does not depend
 # on uncommitted changes. `--locked` keeps Cargo.lock as committed.
@@ -17,29 +19,38 @@
 # each of these features alone (a feature must enable what its code uses; the tests above
 # enable them together, which would hide a missing one) and the feature set the Python
 # wheel is built with (`[tool.maturin] features` in pyproject.toml). It exits 2 when it
-# cannot know what to build (alice-crypto not taken by git at a 40-hex rev, no wheel feature set).
+# cannot know what to build (alice-crypto not from its main branch, no wheel feature set).
 #
 # usage: scripts/crypto_features.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root=$PWD
 
-# the commit alice-crypto is taken at: git on the public repository's https URL, a 40-hex rev
+# the commit alice-crypto is taken at: git on the public repository's https URL, branch "main", and the
+# one commit the committed Cargo.lock resolved for it
 rev=$(python3 - <<'PY'
 import re
+import subprocess
 import tomllib
+URL = "https://github.com/ext-sakamoro/ALICE-Crypto"
+def committed(path):
+    return tomllib.loads(subprocess.run(["git", "show", f"HEAD:{path}"], capture_output=True, text=True,
+                                        check=True).stdout)
 try:
-    d = tomllib.load(open("Cargo.toml", "rb"))["dependencies"]["alice-crypto"]
-except (OSError, KeyError, tomllib.TOMLDecodeError):
-    d = None
-ok = (isinstance(d, dict) and "path" not in d and not ({"branch", "tag"} & set(d))
-      and d.get("git") == "https://github.com/ext-sakamoro/ALICE-Crypto"
-      and isinstance(d.get("rev"), str) and re.fullmatch(r"[0-9a-f]{40}", d["rev"]))
-print(d["rev"] if ok else "")
+    d = committed("Cargo.toml")["dependencies"]["alice-crypto"]
+    lock = committed("Cargo.lock")
+except (OSError, KeyError, tomllib.TOMLDecodeError, subprocess.CalledProcessError):
+    d, lock = None, {}
+ok = (isinstance(d, dict) and "path" not in d and not ({"rev", "tag"} & set(d))
+      and d.get("git") == URL and d.get("branch") == "main" and isinstance(d.get("version"), str))
+pkgs = [p for p in lock.get("package", []) if p.get("name") == "alice-crypto"]
+m = re.fullmatch(re.escape(f"git+{URL}?branch=main#") + r"([0-9a-f]{40})", pkgs[0].get("source", "")) \
+    if len(pkgs) == 1 else None
+print(m.group(1) if ok and m else "")
 PY
 )
 if [[ -z "$rev" ]]; then
-  echo "Cargo.toml: alice-crypto needs git = \"https://github.com/ext-sakamoro/ALICE-Crypto\" and a 40-hex rev" >&2
+  echo "Cargo.toml: alice-crypto needs git = \"https://github.com/ext-sakamoro/ALICE-Crypto\" and branch = \"main\", with one alice-crypto from that branch in the committed Cargo.lock" >&2
   exit 2
 fi
 # the feature set `maturin build` uses for the Python wheel

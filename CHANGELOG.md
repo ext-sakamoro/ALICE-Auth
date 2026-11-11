@@ -15,6 +15,8 @@ All notable changes to ALICE-Auth will be documented in this file.
 - README: FFI の関数の数 (28 → 45、変更の前から 32 あった)、Python・Unity・UE5 の数、試験の数を実数に直した
 
 ### Changed
+- CI: package-integrity を ALICE-Law の共有 file `scripts/package_integrity.py` (と `alice_siblings_check.py` / `id_move_check.py` / `release_baseline.py`、試験 `test_package_integrity.py`) に替え、`scripts/alice_local_registry.py` と試験を削除 git の main branch から取る `alice-crypto` (crates.io に無い 0.7) は blocked と名指し、Cargo.lock が解決した commit で build する (rev の固定を前提にしない) preflight を生成し直した
+- CI: `scripts/crypto_features.sh` は `alice-crypto` を `branch = "main"` (rev・tag なし) で求め、build する commit を commit 済みの Cargo.lock から読む (alice-crypto がちょうど 1 つ、`?branch=main#<40 桁>`) それ以外は cargo を走らせず exit 2 試験を合わせた (lock の欠け・rev・crates.io・2 つ・短縮 commit も exit 2)
 - 依存 `alice-crypto` (feature `crypto`) を rev 4ab0f0e (0.6) の固定から ALICE-Crypto の `branch = "main"` + version 0.7 に替えた 使う API は 0.7 でも同じで、試験は変更なし (`--all-features` 全 green)
 - CI: `fuzz.yml` の `Run fuzz target` の `continue-on-error` を外し、crash で job を red にする artifact は残す
 - Licence: `AGPL-3.0-or-later` → `LicenseRef-Proprietary`

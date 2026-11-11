@@ -14,10 +14,11 @@ the build (cargo would fetch ALICE-Crypto; the fake does not, so these tests are
 - no `[tool.maturin] features` in pyproject.toml exits 2 before anything is built;
 - a failing `cargo test` fails the script even when the log still has enough passed tests,
   and the `pyo3` check is not run;
-- the commit comes from Cargo.toml: alice-crypto by git on the public repository's https URL at a
-  40-hex rev; the old `.github/alice-crypto-pin` and `.github/alice-siblings` are gone and not read;
-- alice-crypto by path, by branch or tag, at a short or upper-case rev, from another URL, or
-  missing exits 2 before cargo runs.
+- the commit comes from the committed Cargo.lock: alice-crypto by git on the public repository's https
+  URL with `branch = "main"` in Cargo.toml, and exactly one alice-crypto from that branch in the lock;
+  the old `.github/alice-crypto-pin` and `.github/alice-siblings` are gone and not read;
+- alice-crypto by path, by rev or tag, on another branch or none, from another URL, without a version,
+  or missing, and a lock without it, with it from a rev or with two of it, exit 2 before cargo runs.
 
 usage: python3 scripts/test_crypto_features.py
 """
@@ -35,8 +36,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "crypto_features.sh"
 URL = "https://github.com/ext-sakamoro/ALICE-Crypto"
-# the ALICE-Crypto commit the repository's manifest takes, read here without the script under test
-SIBLING_SHA = tomllib.loads((ROOT / "Cargo.toml").read_text())["dependencies"]["alice-crypto"]["rev"]
+# the ALICE-Crypto commit the repository's lock resolves, read here without the script under test
+SIBLING_SHA = next(re.fullmatch(r".*#([0-9a-f]{40})", p["source"]).group(1)
+                   for p in tomllib.loads((ROOT / "Cargo.lock").read_text())["package"] if p["name"] == "alice-crypto")
 assert re.fullmatch(r"[0-9a-f]{40}", SIBLING_SHA), SIBLING_SHA
 
 
@@ -48,7 +50,16 @@ def manifest(dep: str | None) -> str:
     return body
 
 
-GOOD = f'git = "{URL}", rev = "{SIBLING_SHA}", version = "0.6", optional = true'
+GOOD = f'git = "{URL}", branch = "main", version = "0.7", optional = true'
+
+
+def lock(*sources: str) -> str:
+    """a Cargo.lock with one alice-crypto package per source"""
+    return "version = 4\n\n" + "".join(
+        f'[[package]]\nname = "alice-crypto"\nversion = "0.7.0"\nsource = "{src}"\n\n' for src in sources)
+
+
+MAIN = f"git+{URL}?branch=main#{SIBLING_SHA}"
 
 FAKE_CARGO = """#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_CARGO_ARGV"
@@ -80,6 +91,7 @@ class CryptoFeatures(unittest.TestCase):
         (self.r / ".github").mkdir()
         shutil.copy(SCRIPT, self.r / "scripts" / "crypto_features.sh")
         (self.r / "Cargo.toml").write_text(manifest(GOOD))
+        (self.r / "Cargo.lock").write_text(lock(MAIN))
         self.write_wheel_features('["pyo3"]')
         git("init", "-q", "-b", "main", cwd=self.r)
         bin_dir = self.tmp / "bin"
@@ -177,16 +189,18 @@ class CryptoFeatures(unittest.TestCase):
         self.assertEqual(self.calls(), ["test --locked --features std,api,ffi,crypto,nizk"])
         self.assertNotIn("crypto features:", p.stdout)
 
-    def test_alice_crypto_not_by_git_at_a_full_rev_exits_2(self) -> None:
+    def test_alice_crypto_not_from_its_main_branch_exits_2(self) -> None:
         bad = {
-            "path": 'path = "../ALICE-Crypto", version = "0.6"',
-            "path and git": f'path = "../ALICE-Crypto", git = "{URL}", rev = "{SIBLING_SHA}"',
-            "branch": f'git = "{URL}", branch = "main"',
-            "tag": f'git = "{URL}", tag = "v0.6.0", rev = "{SIBLING_SHA}"',
-            "short rev": f'git = "{URL}", rev = "{SIBLING_SHA[:12]}"',
-            "upper-case rev": f'git = "{URL}", rev = "{SIBLING_SHA.upper()}"',
-            "other URL": f'git = "https://github.com/someone/ALICE-Crypto", rev = "{SIBLING_SHA}"',
-            "ssh URL": f'git = "ssh://git@github.com/ext-sakamoro/ALICE-Crypto", rev = "{SIBLING_SHA}"',
+            "path": 'path = "../ALICE-Crypto", version = "0.7"',
+            "path and git": f'path = "../ALICE-Crypto", git = "{URL}", branch = "main", version = "0.7"',
+            "rev": f'git = "{URL}", rev = "{SIBLING_SHA}", version = "0.7"',
+            "branch and rev": f'git = "{URL}", branch = "main", rev = "{SIBLING_SHA}", version = "0.7"',
+            "tag": f'git = "{URL}", tag = "v0.7.0", version = "0.7"',
+            "other branch": f'git = "{URL}", branch = "dev", version = "0.7"',
+            "no branch": f'git = "{URL}", version = "0.7"',
+            "no version": f'git = "{URL}", branch = "main"',
+            "other URL": f'git = "https://github.com/someone/ALICE-Crypto", branch = "main", version = "0.7"',
+            "ssh URL": f'git = "ssh://git@github.com/ext-sakamoro/ALICE-Crypto", branch = "main", version = "0.7"',
             "missing": None,
         }
         for name, dep in bad.items():
@@ -195,7 +209,22 @@ class CryptoFeatures(unittest.TestCase):
                 p = self.run_script(NIZK + BRIDGE + result(2))
                 self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
                 self.assertIn('Cargo.toml: alice-crypto needs git = "https://github.com/ext-sakamoro/ALICE-Crypto" '
-                              "and a 40-hex rev", p.stderr)
+                              'and branch = "main"', p.stderr)
+                self.assertEqual(self.calls(), [])
+
+    def test_a_lock_without_one_alice_crypto_from_main_exits_2(self) -> None:
+        bad = {
+            "none": lock(),
+            "from a rev": lock(f"git+{URL}?rev={SIBLING_SHA}#{SIBLING_SHA}"),
+            "from crates.io": lock("registry+https://github.com/rust-lang/crates.io-index"),
+            "two": lock(MAIN, f"git+{URL}?rev={SIBLING_SHA}#{SIBLING_SHA}"),
+            "short commit": lock(f"git+{URL}?branch=main#{SIBLING_SHA[:12]}"),
+        }
+        for name, text in bad.items():
+            with self.subTest(name=name):
+                (self.r / "Cargo.lock").write_text(text)
+                p = self.run_script(NIZK + BRIDGE + result(2))
+                self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
                 self.assertEqual(self.calls(), [])
 
     def test_the_old_pin_files_are_gone_and_not_read(self) -> None:
@@ -209,11 +238,12 @@ class CryptoFeatures(unittest.TestCase):
         self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
         self.assertEqual(self.calls(), [])
 
-    def test_the_rev_is_read_from_the_committed_manifest_however_it_is_spelled(self) -> None:
+    def test_the_commit_is_the_one_the_committed_lock_names(self) -> None:
         other = "0123456789abcdef0123456789abcdef01234567"
         (self.r / "Cargo.toml").write_text(
             '[package]\nname = "x"\nversion = "0.1.0"\n\n[dependencies.alice-crypto]\n'
-            f'# rev = "{"f" * 40}"\ngit = "{URL}"\nrev = \'{other}\'\nversion = "0.6"\n')
+            f'git = "{URL}"\nbranch = \'main\'\nversion = "0.7"\n')
+        (self.r / "Cargo.lock").write_text(lock(f"git+{URL}?branch=main#{other}"))
         p = self.run_script(NIZK + BRIDGE + OTHER + result(3))
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
         self.assertIn(f"ALICE-Crypto at {other} (git)", p.stdout)

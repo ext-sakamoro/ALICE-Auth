@@ -7,8 +7,11 @@ src/**
 deny.toml
 .github/workflows/security-audit.yml
 .github/actions/**
-scripts/alice_local_registry.py
-scripts/test_alice_local_registry.py
+scripts/package_integrity.py
+scripts/test_package_integrity.py
+scripts/alice_siblings_check.py
+scripts/id_move_check.py
+scripts/release_baseline.py
 bindings/*/Cargo.toml
 bindings/*/*/Cargo.toml
 .github/paths/security-audit.txt
