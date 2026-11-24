@@ -23,6 +23,10 @@ env:
   RUSTFLAGS: "-Dwarnings"
   NATIVE_FEATURES: "std,serde,ffi,db,api"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || (github.ref == 'refs/heads/main' && github.sha || github.ref) }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   test:
     name: Test
