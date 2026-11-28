@@ -793,6 +793,16 @@ impl PyRevocationSet {
 // Module
 // ============================================================================
 
+// CPython allocates every object (and the pyclass contents inside it) on a 16-byte boundary; a pyclass
+// whose contents need a larger alignment is undefined behaviour (debug builds abort with a misaligned
+// pointer dereference, release builds run silently on a misaligned address). Hold such data in a Box.
+const _: () = assert!(core::mem::align_of::<PyIdentity>() <= 16);
+const _: () = assert!(core::mem::align_of::<PyAliceId>() <= 16);
+const _: () = assert!(core::mem::align_of::<PyRotatingIdentity>() <= 16);
+const _: () = assert!(core::mem::align_of::<PyRevocationList>() <= 16);
+const _: () = assert!(core::mem::align_of::<PyPolicyEngine>() <= 16);
+const _: () = assert!(core::mem::align_of::<PyRevocationSet>() <= 16);
+
 #[pymodule]
 pub fn alice_auth(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // 型

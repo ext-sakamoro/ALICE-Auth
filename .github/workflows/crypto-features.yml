@@ -22,6 +22,7 @@ on:
       - 'scripts/crypto_features.sh'
       - 'pyproject.toml'
       - 'scripts/test_crypto_features.py'
+      - 'scripts/test_python_bindings.py'
       - '.github/workflows/crypto-features.yml'
       - 'scripts/changed_paths.py'
       - '.github/paths/crypto-features.txt'
@@ -86,6 +87,10 @@ jobs:
         run: python3 scripts/test_crypto_features.py
       - name: Build and test crypto / nizk, check pyo3
         run: scripts/crypto_features.sh
+      # builds the pyo3 extension for the runner's python3, imports it and checks that every registered
+      # name is exported and that signing matches the RFC 8032 Ed25519 vectors; fails when no test ran
+      - name: Python binding tests (runner python3)
+        run: python3 scripts/test_python_bindings.py
 
   # red when the changes job said run and a job was skipped, cancelled or failed
   gate:
